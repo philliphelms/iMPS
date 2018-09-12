@@ -1,6 +1,7 @@
 import numpy as np
 from pyscf.lib.linalg_helper import eig
 from scipy import linalg as la
+import matplotlib.pyplot as plt
 
 ############################################
 # Inputs
@@ -12,7 +13,7 @@ p = 1.
 maxBondDim = 10
 maxIter = 2
 d = 2
-tol = 1e-3
+tol = 1e-5
 ############################################
 
 ############################################
@@ -95,7 +96,12 @@ print('Energy = {}'.format(E))
 converged = False
 iterCnt = 0
 nBond = 1
-Eprev = 0
+E_prev = 0
+fig = plt.figure()
+ax1 = plt.subplot(121)
+ax2 = plt.subplot(122)
+Evec = []
+nBondVec = []
 while not converged:
     nBond += 2
     # Minimize energy wrt Hamiltonian
@@ -172,8 +178,17 @@ while not converged:
     E = np.einsum('ijk,i,k,ijk->',LHBlock,S,S,RHBlock) / np.einsum('ko,k,o,ko->',LBlock,S,S,RBlock)/nBond
     print('Energy = {},{}'.format(E,nBond))
 
-    if np.abs(E - Eprev) < tol:
+    print(np.abs(E-E_prev))
+    print(tol)
+    if np.abs(E - E_prev) < tol:
         converged = True
     else:
         E_prev = E
+        Evec.append(E)
+        nBondVec.append(nBond)
+        ax1.cla()
+        ax1.plot(nBondVec,Evec,'r.')
+        ax2.cla()
+        ax2.semilogy(nBondVec[:-1],np.abs(Evec[:-1]-Evec[-1]),'r.')
+        plt.pause(0.01)
     
