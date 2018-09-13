@@ -4,16 +4,29 @@ from pyscf.lib.numpy_helper import einsum
 from scipy import linalg as la
 import matplotlib.pyplot as plt
 
+############################################################################
+# General Simple Exclusion Process:
+
+#                     _p_
+#           ___ ___ _|_ \/_ ___ ___ ___ ___ ___
+# alpha--->|   |   |   |   |   |   |   |   |   |---> beta
+# gamma<---|___|___|___|___|___|___|___|___|___|<--- delta
+#                   /\___|
+#                      q 
+#
+#
+###########################################################################
+
 ############################################
 # Inputs
-alpha = 0.35
+alpha = 0.8
 beta = 2./3.
 gamma = 0.
 delta = 0. 
 p = 1.
 q = 0.
 s = -1.
-maxBondDim = 10
+maxBondDim = 100
 maxIter = 2
 d = 2
 tol = 1e-8
@@ -81,8 +94,6 @@ inds = np.argsort(e0)
 e0 = e0[inds[-1]]
 rwf = rwf[:,inds[-1]]
 lwf = lwf[:,inds[-1]]
-#print(einsum('i,ij,j->',rwf.conj(),H,rwf)/einsum('i,i->',rwf.conj(),rwf))
-#print(einsum('i,ij,j->',lwf.conj(),H,rwf)/einsum('i,i->',lwf.conj(),rwf))
 # Ensure Proper Normalization
 # <-|R> = 1
 # <L|R> = 1
@@ -131,32 +142,42 @@ if plotConv:
 Evec = []
 nBondVec = []
 while not converged:
+    # -----------------------------------------------------------------------------
+    # Some Prerequisites
     nBond += 2
+    iterCnt += 1
     a[0] = a[1]
     a[1] = min(maxBondDim,a[0]*2)
     # -----------------------------------------------------------------------------
-    # Determine Hamiltonian
-    H = einsum('ijk,jlmn,lopq,ros->mpirnqks',LHBlock,W[2],W[2],RHBlock)
-    (n1,n2,n3,n4,n5,n6,n7,n8) = H.shape
-    H = np.reshape(H,(n1*n2*n3*n4,n5*n6*n7*n8))
+    # Determine Initial Guess
+    # Pad A and B
+    (n1,n2,n3) = A.shape
+    Aguess = np.pad(einsum('ijk,k->ijk',A,S),((0,0),(0,a[0]-n2),(0,a[1]-n3)),'constant')
+    Bguess = np.pad(B,((0,0),(0,a[1]-n3),(0,a[0]-n2)),'constant')
+    initGuess = einsum('ijk,lkm->iljm',Aguess,Bguess)
+    guessShape = initGuess.shape
+    initGuess = initGuess.ravel()
+    # -----------------------------------------------------------------------------
+    # Determine Hamiltonian Function
+    def Hx(x):
+        x_reshape = np.reshape(x,guessShape)
+        tmp1 = einsum('ijk,nqks->ijnqs',LHBlock,x_reshape) # Could be 'ijk,mpir->jkmpr'
+        tmp2 = einsum('jlmn,ijnqs->ilmqs',W[2],tmp1)
+        tmp3 = einsum('lopq,ilmqs->imops',W[2],tmp2)
+        finalVec = einsum('ros,imops->mpir',RHBlock,tmp3)
+        return -finalVec.ravel()
+    def precond(dx,e,x0):
+        return dx
     # -----------------------------------------------------------------------------
     # Solve Eigenproblem
-    u,v = la.eig(H)
-    ind = np.argsort(u)[-1]
-    E = u[ind]/nBond
-    v = v[:,ind]
+    u,v = eig(Hx,initGuess,precond) # PH - Add tolerance here?
+    E = -u/nBond
     print('\tEnergy from Optimization = {}'.format(E))
-    #print('\tEnergy From Contraction = {}'.format(np.dot(v,np.dot(H,v))/np.dot(v,v)/nBond))
     # ------------------------------------------------------------------------------
     # Reshape result into state
-    psi = np.reshape(v,(n1,n2,n3,n4)) # s_l s_(l+1) a_(l-1) a_(l+1)
+    psi = np.reshape(v,(d,d,a[0],a[0])) # s_l s_(l+1) a_(l-1) a_(l+1)
     psi = np.transpose(psi,(2,0,1,3)) # a_(l-1) s_l a_(l+1) s_(l+1)
-    psi = np.reshape(psi,(n3*n1,n4*n2))
-    # Try to calculate energy from this?
-    H = np.reshape(H,(n1,n2,n3,n4,n5,n6,n7,n8))
-    H = np.transpose(H,(2,0,1,3,6,4,5,7))
-    H = np.reshape(H,(n1*n2*n3*n4,n5*n6*n7*n8))
-    #print('\tEnergy From Reshaped Contraction = {}'.format(np.dot(psi.ravel(),np.dot(H,psi.ravel()))/np.dot(psi.ravel(),psi.ravel())/nBond))
+    psi = np.reshape(psi,(a[0]*d,a[0]*d))
     # ------------------------------------------------------------------------------
     # Canonicalize state
     U,S,V = np.linalg.svd(psi)
@@ -167,8 +188,6 @@ while not converged:
     B = B[:a[1],:,:]
     B = np.swapaxes(B,0,1)
     S = S[:a[1]]
-    #E = einsum('ijk,lim,jnlo,okp,qmr,nsqt,tpu,rsu,m,p->',LHBlock,A.conj(),W[2],A,B.conj(),W[2],B,RHBlock,S,S)/nBond
-    #print('\tEnergy after SVD = {}'.format(E))
     # -----------------------------------------------------------------------------
     # Store left and right environments
     LBlock = einsum('ij,kil,kim->lm',LBlock,A.conj(),A)
@@ -177,9 +196,6 @@ while not converged:
     RHBlock= einsum('ijk,lmin,nop,kmp->jlo',B.conj(),W[2],B,RHBlock)
     num = einsum('ijk,i,k,ijk->',LHBlock,S,S,RHBlock)
     den = einsum('ko,k,o,ko->',LBlock,S,S,RBlock)
-    #E = einsum('ijk,i,k,ijk->',LHBlock,S,S,RHBlock) / einsum('ko,k,o,ko->',LBlock,S,S,RBlock)/nBond
-    #print('\tEnergy after storing Blocks = {}'.format(E))
-
     # ------------------------------------------------------------------------------
     # Check for convergence
     if np.abs(E - E_prev) < tol:
