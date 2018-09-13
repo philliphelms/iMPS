@@ -75,6 +75,14 @@ Wl.insert(len(Wl),np.transpose(W[2],(0,1,3,2)).conj())
 ############################################
 
 ############################################
+# Current & Density Operators
+currentOp = [None]*2
+currentOp[0] = np.array([[Sp,Sm]])
+currentOp[1] = np.array([[exp_p*Sm],
+                         [exp_q*Sp]])
+############################################
+
+############################################
 # Make Initial Unit Cell
 H = np.zeros((2**2,2**2))
 occ = np.zeros((2**2,2),dtype=int)
@@ -242,6 +250,10 @@ while not converged:
     Bl = Bl[:a[1],:,:]
     Bl = np.swapaxes(Bl,0,1)
     Sl = Sl[:a[1]]
+    # -----------------------------------------------------------------------------
+    # Calculate Current & Density
+    currentOp
+    current = np.einsum('',LBlock_lr,Al,currentOp[0],A,Bl,currentOp[1],B,RBlock_lr)
     # -----------------------------------------------------------------------------
     # Store left and right environments
     LBlock = einsum('ij,kil,kim->lm',LBlock,A.conj(),A)
