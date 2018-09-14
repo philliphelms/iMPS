@@ -20,8 +20,8 @@ import matplotlib.pyplot as plt
 
 ############################################
 # Inputs
-alpha = 0.9
-beta = 0.9
+alpha = 0.35
+beta = 2./3.
 gamma = 0.
 delta = 0. 
 p = 1.
@@ -95,6 +95,9 @@ densityROp[1] = np.array([[n]])
 ############################################
 # Make Initial Unit Cell
 H = np.zeros((2**2,2**2))
+currH = np.zeros((2**2,2**2))
+rDenH = np.zeros((2**2,2**2))
+lDenH = np.zeros((2**2,2**2))
 occ = np.zeros((2**2,2),dtype=int)
 sum_occ = np.zeros(2**2,dtype=int)
 for i in range(2**2):
@@ -107,9 +110,18 @@ for i in range(2**2):
     for j in range(2**2):
         j_occ = occ[j,:]
         tmp_mat0 = np.array([[1]])
+        currMat0 = np.array([[1]])
+        rDenMat0 = np.array([[1]])
+        lDenMat0 = np.array([[1]])
         for k in range(2):
             tmp_mat0 = einsum('ij,jk->ik',tmp_mat0,W[k][:,:,i_occ[k],j_occ[k]])
-        H[i,j] += tmp_mat0[[0]]
+            currMat0 = einsum('ij,jk->ik',currMat0,currentOp[k][:,:,i_occ[k],j_occ[k]])
+            rDenMat0 = einsum('ij,jk->ik',rDenMat0,densityROp[k][:,:,i_occ[k],j_occ[k]])
+            lDenMat0 = einsum('ij,jk->ik',lDenMat0,densityLOp[k][:,:,i_occ[k],j_occ[k]])
+        H[i,j]     += tmp_mat0[[0]]
+        currH[i,j] += currMat0[[0]]
+        rDenH[i,j] += rDenMat0[[0]]
+        lDenH[i,j] += lDenMat0[[0]]
 # Diagonalize Hamiltonian
 e0,lpsi,psi = la.eig(H,left=True)
 inds = np.argsort(e0)
@@ -122,7 +134,10 @@ lpsi = lpsi[:,inds[-1]]
 psi = psi/np.sum(psi)
 lpsi = lpsi/np.sum(lpsi*psi)
 print('\nExact Diagonalization Energy: {}'.format(e0))
-print('Energy Check {}'.format(einsum('i,ij,j->',lpsi.conj(),H,psi)/einsum('i,i->',lpsi.conj(),psi)))
+print('Energy  Check {}'.format(einsum('i,ij,j->',lpsi.conj(),    H,psi)/einsum('i,i->',lpsi.conj(),psi)))
+print('Current Check {}'.format(einsum('i,ij,j->',lpsi.conj(),currH,psi)/einsum('i,i->',lpsi.conj(),psi)))
+print('L Dens  Check {}'.format(einsum('i,ij,j->',lpsi.conj(),lDenH,psi)/einsum('i,i->',lpsi.conj(),psi)))
+print('R Dens  Check {}'.format(einsum('i,ij,j->',lpsi.conj(),rDenH,psi)/einsum('i,i->',lpsi.conj(),psi)))
 ############################################
 
 ############################################
@@ -155,27 +170,62 @@ print('After SVD, Energy = {}'.format(einsum('jik,k,lkm,nojr,oplt,rqs,s,tsu->',A
 ############################################
 
 ############################################
+# Set initial left and right containers
+LBlock = np.array([[1.]])
+RBlock = np.array([[1.]])
+LHBlock = np.array([[[1.]]])
+RHBlock = np.array([[[1.]]])
+LBlockl = np.array([[1.]])
+RBlockl = np.array([[1.]])
+LHBlockl= np.array([[[1.]]])
+RHBlockl= np.array([[[1.]]])
+LBlocklr = np.array([[1.]])
+RBlocklr = np.array([[1.]])
+LHBlocklr= np.array([[[1.]]])
+RHBlocklr= np.array([[[1.]]])
+############################################
+
+############################################
+# Evaluate Operators
+tmp1 = einsum('ik,lim,m->klm',LBlocklr,Al.conj(),Sl.conj())
+currTmp2 = einsum('klm,jnlo->kmno',tmp1,currentOp[0])
+lDensTmp2= einsum('klm,jnlo->kmno',tmp1,densityLOp[0])
+rDensTmp2= einsum('klm,jnlo->kmno',tmp1,densityROp[0])
+currTmp3 = einsum('kmno,okp,p->mnp',currTmp2,A,S)
+lDensTmp3= einsum('kmno,okp,p->mnp',lDensTmp2,A,S)
+rDensTmp3= einsum('kmno,okp,p->mnp',rDensTmp2,A,S)
+currTmp4 = einsum('mnp,qmr->npqr',currTmp3,Bl.conj())
+lDensTmp4= einsum('mnp,qmr->npqr',lDensTmp3,Bl.conj())
+rDensTmp4= einsum('mnp,qmr->npqr',rDensTmp3,Bl.conj())
+currTmp5 = einsum('npqr,nsqt->prst',currTmp4,currentOp[1])
+lDensTmp5= einsum('npqr,nsqt->prst',lDensTmp4,densityLOp[1])
+rDensTmp5= einsum('npqr,nsqt->prst',rDensTmp4,densityROp[1])
+currTmp6 = einsum('prst,tpu->ru',currTmp5,B)
+lDensTmp6= einsum('prst,tpu->ru',lDensTmp5,B)
+rDensTmp6= einsum('prst,tpu->ru',rDensTmp5,B)
+curr = einsum('ru,ru->',currTmp6,RBlocklr)
+lDens= einsum('ru,ru->',lDensTmp6,RBlocklr)
+rDens= einsum('ru,ru->',rDensTmp6,RBlocklr)
+#current = np.einsum('ik,lim,jnlo,okp,qmr,nsqt,tpu,ru->',LBlocklr,Al.conj(),currentOp[0],A,Bl.conj(),currentOp[1],B,RBlocklr)
+print(curr,lDens,rDens)
+############################################
+
+############################################
 # Store left and right environments
-LBlock = einsum('jik,jno->ko',A.conj(),A)
-RBlock = einsum('lkm,lop->ko',B.conj(),B)
-LHBlock= einsum('jik,nojr,rqs->kos',A.conj(),W[0],A)
-RHBlock= einsum('lkm,oplt,tsu->kos',B.conj(),W[1],B)
-E = einsum('ijk,i,k,ijk->',LHBlock,S,S,RHBlock) / einsum('ko,k,o,ko->',LBlock,S,S,RBlock)
-print('Energy = {}'.format(E))
+LBlock = einsum('ij,kil,kim->lm',LBlock,A.conj(),A)
+RBlock = einsum('ijk,ilm,km->jl',B.conj(),B,RBlock)
+LHBlock= einsum('ijk,lim,jnlo,okp->mnp',LHBlock,A.conj(),W[2],A)
+RHBlock= einsum('ijk,lmin,nop,kmp->jlo',B.conj(),W[2],B,RHBlock)
 # Left
-LBlockl = einsum('jik,jno->ko',Al.conj(),Al)
-RBlockl = einsum('lkm,lop->ko',Bl.conj(),Bl)
-LHBlockl= einsum('jik,nojr,rqs->kos',Al.conj(),Wl[0],Al)
-RHBlockl= einsum('lkm,oplt,tsu->kos',Bl.conj(),Wl[1],Bl)
-El = einsum('ijk,i,k,ijk->',LHBlockl,Sl,Sl,RHBlockl) / einsum('ko,k,o,ko->',LBlockl,Sl,Sl,RBlockl)
-print('Energy = {}'.format(El))
-# Left & Right
-LBlocklr = einsum('jik,jno->ko',Al.conj(),A)
-RBlocklr = einsum('lkm,lop->ko',Bl.conj(),B)
-LHBlocklr = einsum('jik,nojr,rqs->kos',Al.conj(),W[0],A)
-RHBlocklr = einsum('lkm,oplt,tsu->kos',Bl.conj(),W[1],B)
-Elr = einsum('ijk,i,k,ijk->',LHBlocklr,Sl,S,RHBlocklr) / einsum('ko,k,o,ko->',LBlocklr,Sl,S,RBlocklr)
-print('Energy = {}'.format(Elr))
+LBlockl = einsum('ij,kil,kim->lm',LBlockl,Al.conj(),Al)
+RBlockl = einsum('ijk,ilm,km->jl',Bl.conj(),Bl,RBlockl)
+LHBlockl= einsum('ijk,lim,jnlo,okp->mnp',LHBlockl,Al.conj(),Wl[2],Al)
+RHBlockl= einsum('ijk,lmin,nop,kmp->jlo',Bl.conj(),Wl[2],Bl,RHBlockl)
+# Left Right
+LBlocklr = einsum('ij,kil,kim->lm',LBlocklr,Al.conj(),A)
+RBlocklr = einsum('ijk,ilm,km->jl',Bl.conj(),B,RBlocklr)
+LHBlocklr= einsum('ijk,lim,jnlo,okp->mnp',LHBlocklr,Al.conj(),Wl[2],A)
+RHBlocklr= einsum('ijk,lmin,nop,kmp->jlo',Bl.conj(),Wl[2],B,RHBlocklr)
 ############################################
 
 ############################################
@@ -269,9 +319,6 @@ while not converged:
     Sl = Sl[:a[1]]
     # -----------------------------------------------------------------------------
     # Calculate Current & Density
-    print(LBlocklr.shape,'ik')
-    print(Al.conj().shape,'lim')
-    print('ik,lim->klm')
     # PH - Include Singular Values
     tmp1 = einsum('ik,lim,m->klm',LBlocklr,Al.conj(),Sl)
     currTmp2 = einsum('klm,jnlo->kmno',tmp1,currentOp[0])

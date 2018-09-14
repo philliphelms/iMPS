@@ -189,7 +189,7 @@ LHBlock2= einsum('jik,nojr,rqs->kos',A2.conj(),W2[0],A2)
 RHBlock2= einsum('lkm,oplt,tsu->kos',B2.conj(),W2[1],B2)
 E2 = einsum('ijk,i,k,ijk->',LHBlock2,Sr2,Sr2,RHBlock2) / einsum('ko,k,o,ko->',LBlock2,Sr2,Sr2,RBlock2)
 if verbose > 0:
-    print('Energy = {},{}'.format(E1,E2))
+    print('Energy = {},{},{}'.format(E1,E2,(E1-E2)/(2.*ds)))
 ############################################
 
 ############################################
