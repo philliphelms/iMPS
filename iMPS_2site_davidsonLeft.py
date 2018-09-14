@@ -1,6 +1,7 @@
 import numpy as np
 from pyscf.lib.linalg_helper import eig
-from pyscf.lib.numpy_helper import einsum
+#from pyscf.lib.numpy_helper import einsum
+from numpy import einsum
 from scipy import linalg as la
 import matplotlib.pyplot as plt
 
@@ -19,8 +20,8 @@ import matplotlib.pyplot as plt
 
 ############################################
 # Inputs
-alpha = 0.8
-beta = 2./3.
+alpha = 0.9
+beta = 0.9
 gamma = 0.
 delta = 0. 
 p = 1.
@@ -32,17 +33,26 @@ d = 2
 tol = 1e-8
 plotConv = True
 plotConvIn = False
-hamType = 'tasep'
+hamType = 'sep'
 ############################################
 
 ############################################
 # Determine MPO
+# Basic Operators
 Sp = np.array([[0,1],[0,0]])
 Sm = np.array([[0,0],[1,0]])
 n = np.array([[0,0],[0,1]])
 v = np.array([[1,0],[0,0]])
 I = np.array([[1,0],[0,1]])
 z = np.array([[0,0],[0,0]])
+# Exponentially weighted hopping rates
+exp_alpha = np.exp(-s)*alpha
+exp_beta = np.exp(-s)*beta
+exp_p = np.exp(-s)*p
+exp_q = np.exp(s)*q
+exp_delta = np.exp(s)*delta
+exp_gamma = np.exp(s)*gamma
+# MPO Lists
 W = []
 Wl = []
 if hamType == 'tasep':
@@ -50,12 +60,6 @@ if hamType == 'tasep':
     W.insert(len(W),np.array([[I],[Sm],[v],[beta*(np.exp(-s)*Sp-n)]]))
     W.insert(len(W),np.array([[I,z,z,z],[Sm,z,z,z],[v,z,z,z],[z,np.exp(-s)*Sp,-n,I]]))
 elif hamType == 'sep':
-    exp_alpha = np.exp(-s)*alpha
-    exp_beta = np.exp(-s)*beta
-    exp_p = np.exp(-s)*p
-    exp_q = np.exp(s)*q
-    exp_delta = np.exp(s)*delta
-    exp_gamma = np.exp(s)*gamma
     W.insert(len(W),np.array([[exp_alpha*Sm-alpha*v+exp_gamma*Sp-gamma*n, Sp, -n, Sm,-v, I]]))
     W.insert(len(W),np.array([[I                                      ],
                               [exp_p*Sm                               ],
@@ -80,6 +84,12 @@ currentOp = [None]*2
 currentOp[0] = np.array([[Sp,Sm]])
 currentOp[1] = np.array([[exp_p*Sm],
                          [exp_q*Sp]])
+densityLOp = [None]*2
+densityLOp[0] = np.array([[n]])
+densityLOp[1] = np.array([[I]])
+densityROp = [None]*2
+densityROp[0] = np.array([[I]])
+densityROp[1] = np.array([[n]])
 ############################################
 
 ############################################
@@ -159,6 +169,13 @@ LHBlockl= einsum('jik,nojr,rqs->kos',Al.conj(),Wl[0],Al)
 RHBlockl= einsum('lkm,oplt,tsu->kos',Bl.conj(),Wl[1],Bl)
 El = einsum('ijk,i,k,ijk->',LHBlockl,Sl,Sl,RHBlockl) / einsum('ko,k,o,ko->',LBlockl,Sl,Sl,RBlockl)
 print('Energy = {}'.format(El))
+# Left & Right
+LBlocklr = einsum('jik,jno->ko',Al.conj(),A)
+RBlocklr = einsum('lkm,lop->ko',Bl.conj(),B)
+LHBlocklr = einsum('jik,nojr,rqs->kos',Al.conj(),W[0],A)
+RHBlocklr = einsum('lkm,oplt,tsu->kos',Bl.conj(),W[1],B)
+Elr = einsum('ijk,i,k,ijk->',LHBlocklr,Sl,S,RHBlocklr) / einsum('ko,k,o,ko->',LBlocklr,Sl,S,RBlocklr)
+print('Energy = {}'.format(Elr))
 ############################################
 
 ############################################
@@ -252,8 +269,31 @@ while not converged:
     Sl = Sl[:a[1]]
     # -----------------------------------------------------------------------------
     # Calculate Current & Density
-    currentOp
-    current = np.einsum('',LBlock_lr,Al,currentOp[0],A,Bl,currentOp[1],B,RBlock_lr)
+    print(LBlocklr.shape,'ik')
+    print(Al.conj().shape,'lim')
+    print('ik,lim->klm')
+    # PH - Include Singular Values
+    tmp1 = einsum('ik,lim,m->klm',LBlocklr,Al.conj(),Sl)
+    currTmp2 = einsum('klm,jnlo->kmno',tmp1,currentOp[0])
+    lDensTmp2= einsum('klm,jnlo->kmno',tmp1,densityLOp[0])
+    rDensTmp2= einsum('klm,jnlo->kmno',tmp1,densityROp[0])
+    currTmp3 = einsum('kmno,okp,p->mnp',currTmp2,A,S)
+    lDensTmp3= einsum('kmno,okp,p->mnp',lDensTmp2,A,S)
+    rDensTmp3= einsum('kmno,okp,p->mnp',rDensTmp2,A,S)
+    currTmp4 = einsum('mnp,qmr->npqr',currTmp3,Bl.conj())
+    lDensTmp4= einsum('mnp,qmr->npqr',lDensTmp3,Bl.conj())
+    rDensTmp4= einsum('mnp,qmr->npqr',rDensTmp3,Bl.conj())
+    currTmp5 = einsum('npqr,nsqt->prst',currTmp4,currentOp[1])
+    lDensTmp5= einsum('npqr,nsqt->prst',lDensTmp4,densityLOp[1])
+    rDensTmp5= einsum('npqr,nsqt->prst',rDensTmp4,densityROp[1])
+    currTmp6 = einsum('prst,tpu->ru',currTmp5,B)
+    lDensTmp6= einsum('prst,tpu->ru',lDensTmp5,B)
+    rDensTmp6= einsum('prst,tpu->ru',rDensTmp5,B)
+    curr = einsum('ru,ru->',currTmp6,RBlocklr)
+    lDens= einsum('ru,ru->',lDensTmp6,RBlocklr)
+    rDens= einsum('ru,ru->',rDensTmp6,RBlocklr)
+    #current = np.einsum('ik,lim,jnlo,okp,qmr,nsqt,tpu,ru->',LBlocklr,Al.conj(),currentOp[0],A,Bl.conj(),currentOp[1],B,RBlocklr)
+    print(curr,lDens,rDens)
     # -----------------------------------------------------------------------------
     # Store left and right environments
     LBlock = einsum('ij,kil,kim->lm',LBlock,A.conj(),A)
@@ -265,6 +305,11 @@ while not converged:
     RBlockl = einsum('ijk,ilm,km->jl',Bl.conj(),Bl,RBlockl)
     LHBlockl= einsum('ijk,lim,jnlo,okp->mnp',LHBlockl,Al.conj(),Wl[2],Al)
     RHBlockl= einsum('ijk,lmin,nop,kmp->jlo',Bl.conj(),Wl[2],Bl,RHBlockl)
+    # Left Right
+    LBlocklr = einsum('ij,kil,kim->lm',LBlocklr,Al.conj(),A)
+    RBlocklr = einsum('ijk,ilm,km->jl',Bl.conj(),B,RBlocklr)
+    LHBlocklr= einsum('ijk,lim,jnlo,okp->mnp',LHBlocklr,Al.conj(),Wl[2],A)
+    RHBlocklr= einsum('ijk,lmin,nop,kmp->jlo',Bl.conj(),Wl[2],B,RHBlocklr)
     # ------------------------------------------------------------------------------
     # Check for convergence
     if (np.abs(E - E_prev) < tol) and (np.abs(El - Elprev) < tol):
