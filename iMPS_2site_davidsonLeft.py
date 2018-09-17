@@ -20,13 +20,13 @@ import matplotlib.pyplot as plt
 
 ############################################
 # Inputs
-alpha = 0.2
-beta = 0.8
+alpha = 0.8
+beta = 2./3.
 gamma = 0.
 delta = 0. 
 p = 1.
 q = 0.
-s = -1.
+s = -0.5
 maxBondDim = 10
 maxIter = 2
 d = 2
@@ -134,19 +134,12 @@ lpsi = lpsi[:,inds[-1]]
 # <L|R> = 1
 psi = psi/np.sum(psi)
 lpsi = lpsi/np.sum(lpsi*psi)
-#print('\nExact Diagonalization Energy: {}'.format(u))
-#print('Energy  Check {}'.format(einsum('i,ij,j->',lpsi.conj(),    H,psi)/einsum('i,i->',lpsi.conj(),psi)))
-#print('Current Check {}'.format(einsum('i,ij,j->',lpsi.conj(),currH,psi)/einsum('i,i->',lpsi.conj(),psi)))
-#print('L Dens  Check {}'.format(einsum('i,ij,j->',lpsi.conj(),lDenH,psi)/einsum('i,i->',lpsi.conj(),psi)))
-#print('R Dens  Check {}'.format(einsum('i,ij,j->',lpsi.conj(),rDenH,psi)/einsum('i,i->',lpsi.conj(),psi)))
 ############################################
 
 ############################################
 # Reshape wavefunction for SVD
 psi = np.reshape(psi,(2,2))
 lpsi = np.reshape(lpsi,(2,2))
-#print('After Reshaping, Energy = {}'.format(einsum('ij,klim,lnjo,mo->',psi.conj(),W[0],W[1],psi)/
-#                                            einsum('ij,ij->',psi.conj(),psi)))
 ############################################
 
 ############################################
@@ -157,8 +150,6 @@ A = np.reshape(U,(a[0],d,a[1]))
 A = np.swapaxes(A,0,1)
 B = np.reshape(V,(a[1],d,a[0]))
 B = np.swapaxes(B,0,1)
-#print('After SVD, Energy = {}'.format(einsum('jik,k,lkm,nojr,oplt,rqs,s,tsu->',A.conj(),S,B.conj(),W[0],W[1],A,S,B)/
-#                                      einsum('jik,k,lkm,jno,o,lop->',A.conj(),S,B.conj(),A,S,B)))
 # Left
 Ul,Sl,Vl = np.linalg.svd(lpsi)
 a = [1,min(maxBondDim,d)] # Keep Track of bond dimensions
@@ -166,8 +157,6 @@ Al = np.reshape(Ul,(a[0],d,a[1]))
 Al = np.swapaxes(Al,0,1)
 Bl = np.reshape(Vl,(a[1],d,a[0]))
 Bl = np.swapaxes(Bl,0,1)
-#print('After SVD, Energy = {}'.format(einsum('jik,k,lkm,nojr,oplt,rqs,s,tsu->',Al.conj(),Sl,Bl.conj(),Wl[0],Wl[1],Al,Sl,Bl)/
-#                                      einsum('jik,k,lkm,jno,o,lop->',Al.conj(),Sl,Bl.conj(),Al,Sl,Bl)))
 ############################################
 
 ############################################
@@ -190,7 +179,7 @@ RCurrBlock = np.array([[[1.]]])
 
 ############################################
 # Evaluate Operators
-# Total Current ---------
+# total current ---------
 tmp1 = einsum('ijk , lim, m->jklm',LCurrBlock, Al.conj(),   Sl.conj())
 tmp2 = einsum('jklm, jnlo  ->kmno',tmp1      , currentOp[0]          )
 tmp3 = einsum('kmno, okp, p->mnp ',tmp2      , A,           S        )
@@ -214,7 +203,6 @@ tmp4 = einsum('mnp , qmr   ->npqr',tmp3,     Bl.conj()              )
 tmp5 = einsum('npqr, nsqt  ->prst',tmp4,     densityROp[1]          )
 tmp6 = einsum('prst, tpu   ->su  ',tmp5,     B                      )
 denr = einsum('ru  , ru    ->    ',tmp6,     RBlocklr               )
-print(u,curr,denl,denr)
 ############################################
 
 ############################################
@@ -229,13 +217,13 @@ RBlockl = einsum('ijk,ilm,km->jl',Bl.conj(),Bl,RBlockl)
 LHBlockl= einsum('ijk,lim,jnlo,okp->mnp',LHBlockl,Al.conj(),Wl[0],Al)
 RHBlockl= einsum('ijk,lmin,nop,kmp->jlo',Bl.conj(),Wl[1],Bl,RHBlockl)
 # Left Right
-LBlocklr  = einsum('ij,kil,kim->lm',LBlocklr,Al.conj(),A)
-RBlocklr  = einsum('ijk,ilm,km->jl',Bl.conj(),B,RBlocklr)
-LHBlocklr = einsum('ijk,lim,jnlo,okp->mnp',LHBlocklr,Al.conj(),Wl[0],A)
-RHBlocklr = einsum('ijk,lmin,nop,kmp->jlo',Bl.conj(),Wl[1],B,RHBlocklr)
+LBlocklr  = einsum('jl,ijk,ilm->km',LBlocklr,Al.conj(),A)
+RBlocklr  = einsum('op,nko,nmp->km',RBlocklr,Bl.conj(),B)
+LHBlocklr = einsum('ijk,lim,jnlo,okp->mnp',LHBlocklr,Al.conj(),W[0],A)
+RHBlocklr = einsum('qmr,nsqt,tpu,rsu->mnp',Bl.conj(),W[1],B,RHBlocklr)
 LCurrBlock= einsum('ijk,lim,jnlo,okp->mnp',LCurrBlock,Al.conj(),currentOp[0],A)
 RCurrBlock= einsum('ijk,lmin,nop,kmp->jlo',Bl.conj(),currentOp[1],B,RCurrBlock)
-#print(einsum('ijk,ijk,i,k->',LCurrBlock,RCurrBlock,Sl.conj(),S))
+print(u,curr,denl,denr)
 ############################################
 
 ############################################
@@ -299,6 +287,7 @@ while not converged:
     # Left
     ul,vl = eig(Hlx,initGuessl,precond) # PH - Add tolerance here?
     El = -u/nBond
+    # PH - Figure out normalization
     # ------------------------------------------------------------------------------
     # Reshape result into state
     psi = np.reshape(v,(d,d,a[0],a[0])) # s_l s_(l+1) a_(l-1) a_(l+1)
@@ -327,7 +316,6 @@ while not converged:
     Bl = Bl[:a[1],:,:]
     Bl = np.swapaxes(Bl,0,1)
     Sl = Sl[:a[1]]
-    #print(einsum('ijk,',LHBlock,A.conj(),W[2],A,S,S,B.conj(),W[2],B,RHBlock))
     # -----------------------------------------------------------------------------
     # Calculate Current & Density
     # Total Current ---------
@@ -366,20 +354,20 @@ while not converged:
     LHBlockl= einsum('ijk,lim,jnlo,okp->mnp',LHBlockl,Al.conj(),Wl[2],Al)
     RHBlockl= einsum('ijk,lmin,nop,kmp->jlo',Bl.conj(),Wl[2],Bl,RHBlockl)
     # Left Right
-    LBlocklr  = einsum('ij,kil,kim->lm',LBlocklr,Al.conj(),A)
-    RBlocklr  = einsum('ijk,ilm,km->jl',Bl.conj(),B,RBlocklr)
-    LHBlocklr = einsum('ijk,lim,jnlo,okp->mnp',LHBlocklr,Al.conj(),Wl[2],A)
-    RHBlocklr = einsum('ijk,lmin,nop,kmp->jlo',Bl.conj(),Wl[2],B,RHBlocklr)
+    LBlocklr  = einsum('jl,ijk,ilm->km',LBlocklr,Al.conj(),A)
+    RBlocklr  = einsum('op,nko,nmp->km',RBlocklr,Bl.conj(),B)
+    LHBlocklr = einsum('ijk,lim,jnlo,okp->mnp',LHBlocklr,Al.conj(),W[2],A)
+    RHBlocklr = einsum('qmr,nsqt,tpu,rsu->mnp',Bl.conj(),W[2],B,RHBlocklr)
     LCurrBlock= einsum('ijk,lim,jnlo,okp->mnp',LCurrBlock,Al.conj(),currentOp[2],A)
     RCurrBlock= einsum('ijk,lmin,nop,kmp->jlo',Bl.conj(),currentOp[2],B,RCurrBlock)
-    #print(einsum('ijk,ijk,i,k->',LCurrBlock,RCurrBlock,Sl.conj(),S))
     # ------------------------------------------------------------------------------
     # Determine Normalization Factor
     normFact = einsum('lm,lm,l,m->',LBlocklr,RBlocklr,Sl,S)
-    curr /= normFact*nBond
+    curr /= nBond*normFact
     denl /= normFact
     denr /= normFact
-    print(E,curr,denl,denr,normFact)
+    print(normFact)
+    print(E,curr,denl,denr)
     # ------------------------------------------------------------------------------
     # Check for convergence
     if (np.abs(E - E_prev) < tol) and (np.abs(El - El_prev) < tol) and (np.abs(curr-curr_prev) < tol):
