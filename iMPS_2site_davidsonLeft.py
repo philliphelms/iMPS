@@ -26,8 +26,8 @@ gamma = 0.
 delta = 0. 
 p = 1.
 q = 0.
-s = -0.5
-maxBondDim = 10
+s = 0.
+maxBondDim = 20
 maxIter = 2
 d = 2
 tol = 1e-8
@@ -85,12 +85,9 @@ currentOp[2] = np.array([[I,        z,   z, z],
                          [exp_p*Sm, z,   z, z],
                          [exp_q*Sp, z,   z, z],
                          [z,        Sp, Sm, I]])
-densityLOp = [None]*2
-densityLOp[0] = np.array([[n]])
-densityLOp[1] = np.array([[I]])
-densityROp = [None]*2
-densityROp[0] = np.array([[I]])
-densityROp[1] = np.array([[n]])
+densityOp = [None]*2
+densityOp[0] = np.array([[n]])
+densityOp[1] = np.array([[I]])
 ############################################
 
 ############################################
@@ -117,8 +114,8 @@ for i in range(2**2):
         for k in range(2):
             tmp_mat0 = einsum('ij,jk->ik',tmp_mat0,W[k][:,:,i_occ[k],j_occ[k]])
             currMat0 = einsum('ij,jk->ik',currMat0,currentOp[k][:,:,i_occ[k],j_occ[k]])
-            rDenMat0 = einsum('ij,jk->ik',rDenMat0,densityROp[k][:,:,i_occ[k],j_occ[k]])
-            lDenMat0 = einsum('ij,jk->ik',lDenMat0,densityLOp[k][:,:,i_occ[k],j_occ[k]])
+            rDenMat0 = einsum('ij,jk->ik',rDenMat0,densityOp[k][:,:,i_occ[k],j_occ[k]])
+            lDenMat0 = einsum('ij,jk->ik',lDenMat0,densityOp[k][:,:,i_occ[k],j_occ[k]])
         H[i,j]     += tmp_mat0[[0]]
         currH[i,j] += currMat0[[0]]
         rDenH[i,j] += rDenMat0[[0]]
@@ -161,18 +158,12 @@ Bl = np.swapaxes(Bl,0,1)
 
 ############################################
 # Set initial left and right containers
-LBlock = np.array([[1.]])
-RBlock = np.array([[1.]])
 LHBlock = np.array([[[1.]]])
 RHBlock = np.array([[[1.]]])
-LBlockl = np.array([[1.]])
-RBlockl = np.array([[1.]])
 LHBlockl= np.array([[[1.]]])
 RHBlockl= np.array([[[1.]]])
 LBlocklr = np.array([[1.]])
 RBlocklr = np.array([[1.]])
-LHBlocklr= np.array([[[1.]]])
-RHBlocklr= np.array([[[1.]]])
 LCurrBlock = np.array([[[1.]]])
 RCurrBlock = np.array([[[1.]]])
 ############################################
@@ -189,38 +180,32 @@ tmp6 = einsum('prst, tpu   ->rsu ',tmp5      , B                     )
 curr = einsum('rsu , rsu   ->    ',tmp6      , RCurrBlock            )
 # Left  Density ---------
 tmp1 = einsum('ik  , lim, m->klm ',LBlocklr, Al.conj(),    Sl.conj())
-tmp2 = einsum('klm , jnlo  ->kmno',tmp1,     densityLOp[0]          )
+tmp2 = einsum('klm , jnlo  ->kmno',tmp1,     densityOp[0]          )
 tmp3 = einsum('kmno, okp, p->mnp ',tmp2,     A,            S        )
 tmp4 = einsum('mnp , qmr   ->npqr',tmp3,     Bl.conj()              )
-tmp5 = einsum('npqr, nsqt  ->prst',tmp4,     densityLOp[1]          )
+tmp5 = einsum('npqr, nsqt  ->prst',tmp4,     densityOp[1]          )
 tmp6 = einsum('prst, tpu   ->su  ',tmp5,     B                      )
 denl = einsum('ru  , ru    ->    ',tmp6,     RBlocklr               )
 # Right Density ---------
 tmp1 = einsum('ik  , lim, m->klm ',LBlocklr, Al.conj(),    Sl.conj())
-tmp2 = einsum('klm , jnlo  ->kmno',tmp1,     densityROp[0]          )
+tmp2 = einsum('klm , jnlo  ->kmno',tmp1,     densityOp[1]          )
 tmp3 = einsum('kmno, okp, p->mnp ',tmp2,     A,            S        )
 tmp4 = einsum('mnp , qmr   ->npqr',tmp3,     Bl.conj()              )
-tmp5 = einsum('npqr, nsqt  ->prst',tmp4,     densityROp[1]          )
+tmp5 = einsum('npqr, nsqt  ->prst',tmp4,     densityOp[0]          )
 tmp6 = einsum('prst, tpu   ->su  ',tmp5,     B                      )
 denr = einsum('ru  , ru    ->    ',tmp6,     RBlocklr               )
 ############################################
 
 ############################################
 # Store left and right environments
-LBlock = einsum('ij,kil,kim->lm',LBlock,A.conj(),A)
-RBlock = einsum('ijk,ilm,km->jl',B.conj(),B,RBlock)
 LHBlock= einsum('ijk,lim,jnlo,okp->mnp',LHBlock,A.conj(),W[0],A)
 RHBlock= einsum('ijk,lmin,nop,kmp->jlo',B.conj(),W[1],B,RHBlock)
 # Left
-LBlockl = einsum('ij,kil,kim->lm',LBlockl,Al.conj(),Al)
-RBlockl = einsum('ijk,ilm,km->jl',Bl.conj(),Bl,RBlockl)
 LHBlockl= einsum('ijk,lim,jnlo,okp->mnp',LHBlockl,Al.conj(),Wl[0],Al)
 RHBlockl= einsum('ijk,lmin,nop,kmp->jlo',Bl.conj(),Wl[1],Bl,RHBlockl)
 # Left Right
 LBlocklr  = einsum('jl,ijk,ilm->km',LBlocklr,Al.conj(),A)
 RBlocklr  = einsum('op,nko,nmp->km',RBlocklr,Bl.conj(),B)
-LHBlocklr = einsum('ijk,lim,jnlo,okp->mnp',LHBlocklr,Al.conj(),W[0],A)
-RHBlocklr = einsum('qmr,nsqt,tpu,rsu->mnp',Bl.conj(),W[1],B,RHBlocklr)
 LCurrBlock= einsum('ijk,lim,jnlo,okp->mnp',LCurrBlock,Al.conj(),currentOp[0],A)
 RCurrBlock= einsum('ijk,lmin,nop,kmp->jlo',Bl.conj(),currentOp[1],B,RCurrBlock)
 print(u,curr,denl,denr)
@@ -288,6 +273,8 @@ while not converged:
     ul,vl = eig(Hlx,initGuessl,precond) # PH - Add tolerance here?
     El = -u/nBond
     # PH - Figure out normalization
+    v = v/np.sum(v)
+    vl = vl/(np.dot(vl,v))
     # ------------------------------------------------------------------------------
     # Reshape result into state
     psi = np.reshape(v,(d,d,a[0],a[0])) # s_l s_(l+1) a_(l-1) a_(l+1)
@@ -328,45 +315,55 @@ while not converged:
     curr = einsum('rsu , rsu   ->    ',tmp6      , RCurrBlock            )
     # Left  Density ---------
     tmp1 = einsum('ik  , lim, m->klm ',LBlocklr, Al.conj(),    Sl.conj())
-    tmp2 = einsum('klm , jnlo  ->kmno',tmp1,     densityLOp[0]          )
+    tmp2 = einsum('klm , jnlo  ->kmno',tmp1,     densityOp[0]          )
     tmp3 = einsum('kmno, okp, p->mnp ',tmp2,     A,            S        )
     tmp4 = einsum('mnp , qmr   ->npqr',tmp3,     Bl.conj()              )
-    tmp5 = einsum('npqr, nsqt  ->prst',tmp4,     densityLOp[1]          )
+    tmp5 = einsum('npqr, nsqt  ->prst',tmp4,     densityOp[1]          )
     tmp6 = einsum('prst, tpu   ->su  ',tmp5,     B                      )
     denl = einsum('ru  , ru    ->    ',tmp6,     RBlocklr               )
     # Right Density ---------
     tmp1 = einsum('ik  , lim, m->klm ',LBlocklr, Al.conj(),    Sl.conj())
-    tmp2 = einsum('klm , jnlo  ->kmno',tmp1,     densityROp[0]          )
+    tmp2 = einsum('klm , jnlo  ->kmno',tmp1,     densityOp[1]          )
     tmp3 = einsum('kmno, okp, p->mnp ',tmp2,     A,            S        )
     tmp4 = einsum('mnp , qmr   ->npqr',tmp3,     Bl.conj()              )
-    tmp5 = einsum('npqr, nsqt  ->prst',tmp4,     densityROp[1]          )
+    tmp5 = einsum('npqr, nsqt  ->prst',tmp4,     densityOp[0]          )
     tmp6 = einsum('prst, tpu   ->su  ',tmp5,     B                      )
     denr = einsum('ru  , ru    ->    ',tmp6,     RBlocklr               )
     # -----------------------------------------------------------------------------
     # Store left and right environments
-    LBlock = einsum('ij,kil,kim->lm',LBlock,A.conj(),A)
-    RBlock = einsum('ijk,ilm,km->jl',B.conj(),B,RBlock)
-    LHBlock= einsum('ijk,lim,jnlo,okp->mnp',LHBlock,A.conj(),W[2],A)
-    RHBlock= einsum('ijk,lmin,nop,kmp->jlo',B.conj(),W[2],B,RHBlock)
+    tmp1 = einsum('ijk,lim->jklm',LHBlock,A.conj())
+    tmp2 = einsum('jklm,jnlo->kmno',tmp1,W[2])
+    LHBlock = einsum('kmno,okp->mnp',tmp2,A)
+    tmp1 = einsum('nop,kmp->kmno',B,RHBlock)
+    tmp2 = einsum('kmno,lmin->iklo',tmp1,W[2])
+    RHBlock = einsum('iklo,ijk->jlo',tmp2,B.conj())
     # Left
-    LBlockl = einsum('ij,kil,kim->lm',LBlockl,Al.conj(),Al)
-    RBlockl = einsum('ijk,ilm,km->jl',Bl.conj(),Bl,RBlockl)
-    LHBlockl= einsum('ijk,lim,jnlo,okp->mnp',LHBlockl,Al.conj(),Wl[2],Al)
-    RHBlockl= einsum('ijk,lmin,nop,kmp->jlo',Bl.conj(),Wl[2],Bl,RHBlockl)
-    # Left Right
-    LBlocklr  = einsum('jl,ijk,ilm->km',LBlocklr,Al.conj(),A)
-    RBlocklr  = einsum('op,nko,nmp->km',RBlocklr,Bl.conj(),B)
-    LHBlocklr = einsum('ijk,lim,jnlo,okp->mnp',LHBlocklr,Al.conj(),W[2],A)
-    RHBlocklr = einsum('qmr,nsqt,tpu,rsu->mnp',Bl.conj(),W[2],B,RHBlocklr)
-    LCurrBlock= einsum('ijk,lim,jnlo,okp->mnp',LCurrBlock,Al.conj(),currentOp[2],A)
-    RCurrBlock= einsum('ijk,lmin,nop,kmp->jlo',Bl.conj(),currentOp[2],B,RCurrBlock)
+    tmp1 = einsum('ijk,lim->jklm',LHBlockl,Al.conj())
+    tmp2 = einsum('jklm,jnlo->kmno',tmp1,Wl[2])
+    LHBlockl = einsum('kmno,okp->mnp',tmp2,Al)
+    tmp1 = einsum('nop,kmp->kmno',Bl,RHBlockl)
+    tmp2 = einsum('kmno,lmin->iklo',tmp1,Wl[2])
+    RHBlockl = einsum('iklo,ijk->jlo',tmp2,Bl.conj())
+    # Left Right Normalization
+    tmp1 = einsum('jl,ijk->ilk',LBlocklr,Al.conj())
+    LBlocklr = einsum('ilk,ilm->km',tmp1,A)
+    tmp1 = einsum('op,nko->nkp',RBlocklr,Bl.conj())
+    RBlocklr = einsum('nkp,nmp->km',tmp1,B)
+    tmp1 = einsum('ijk,lim->jklm',LCurrBlock,Al.conj())
+    tmp2 = einsum('jklm,jnlo->kmno',tmp1,currentOp[2])
+    LCurrBlock = einsum('kmno,okp->mnp',tmp2,A)
+    tmp1 = einsum('nop,kmp->kmno',B,RCurrBlock)
+    tmp2 = einsum('kmno,lmin->iklo',tmp1,currentOp[2])
+    RCurrBlock = einsum('iklo,ijk->jlo',tmp2,Bl.conj())
     # ------------------------------------------------------------------------------
     # Determine Normalization Factor
-    normFact = einsum('lm,lm,l,m->',LBlocklr,RBlocklr,Sl,S)
+    tmp1 = einsum('lm,m->lm',LBlocklr,S)
+    tmp2 = einsum('lm,l->lm',tmp1,Sl.conj())
+    normFact = einsum('lm,lm->',tmp2,RBlocklr)
+    print(normFact)
     curr /= nBond*normFact
     denl /= normFact
     denr /= normFact
-    print(normFact)
     print(E,curr,denl,denr)
     # ------------------------------------------------------------------------------
     # Check for convergence
