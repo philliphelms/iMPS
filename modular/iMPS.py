@@ -4,6 +4,20 @@ from pyscf.lib.numpy_helper import einsum
 from scipy import linalg as la
 from iMPO import *
 
+############################################################################
+# General Simple Exclusion Process:
+
+#                     _p_
+#           ___ ___ _|_ \/_ ___ ___ ___ ___ ___
+# alpha--->|   |   |   |   |   |   |   |   |   |---> beta
+# gamma<---|___|___|___|___|___|___|___|___|___|<--- delta
+#                   /\___|
+#                      q 
+#
+#
+###########################################################################
+
+
 def sortEig(mat,left=True,n_eig=1):
     # Return n_eig smallest eigenvalues and associated eigenvectors
     if left:
@@ -48,7 +62,10 @@ def createInitMPS(W,maxBondDim=10,d=2):
     E = einsum('ijk,i,k,ijk->',hBlock[0],S,S,hBlock[1]) / einsum('ko,k,o,ko->',block[0],S,S,block[1])
     print('After Blocking, Energy = {}'.format(E))
     ############################################
-    return (E,[A,B],block,hBlock)
+    # Create the next guess
+    nextGuess = makeNextGuess(A,S,B,a,maxBondDim)
+    print(nextGuess.shape)
+    return (E,[A,B],block,hBlock,nextGuess)
 
 def makeBlocks(mps,mpo=None,block=None):
     if block is None:
@@ -63,6 +80,15 @@ def makeBlocks(mps,mpo=None,block=None):
         block[0] = einsum('ijk,lim,jnlo,okp->mnp',block[0],mps[0].conj(),mpo[0],mps[0])
         block[1] = einsum('ijk,lmin,nop,kmp->jlo',mps[1].conj(),mpo[1],mps[1],block[1])
     return block
+
+def makeNextGuess(A,S,B,a,maxBondDim=10):
+    a0 = a[1]
+    a1 = min(maxBondDim,a0*2)
+    (n1,n2,n3) = A.shape
+    Aguess = np.pad(einsum('ijk,k->ijk',A,S),((0,0),(0,a0-n2),(0,a1-n3)),'constant')
+    Bguess = np.pad(B,((0,0),(0,a1-n3),(0,a0-n2)),'constant')
+    initGuess = einsum('ijk,lkm->iljm',Aguess,Bguess)
+    return initGuess
 
 def decompose(psi,a,d=2):
     # Canonicalize state
@@ -100,11 +126,28 @@ def setupEigenProbSlow(HBlock,mpo):
     H = np.reshape(H,(n1*n2*n3*n4,n5*n6*n7*n8))
     return H
 
+def setupEigenProb(mpo,HBlock,nextGuess):
+    guessShape = nextGuess.shape
+    def Hx(x):
+        x_reshape = np.reshape(x,guessShape)
+        tmp1 = einsum('ijk,nqks->ijnqs',HBlock[0],x_reshape) # Could be 'ijk,mpir->jkmpr'
+        tmp2 = einsum('jlmn,ijnqs->ilmqs',mpo,tmp1)
+        tmp3 = einsum('lopq,ilmqs->imops',mpo,tmp2)
+        finalVec = einsum('ros,imops->mpir',HBlock[1],tmp3)
+        return -finalVec.ravel()
+    def precond(dx,e,x0):
+        return dx
+    return (Hx,nextGuess.ravel(),precond)
+
 def runEigenSolverSlow(H):
     u,v = sortEig(H,left=False)
-    return u,v
+    return u[0],v
 
-def runOpt(mps,mpo,block,hBlock,E_init=0,maxBondDim=10,maxIter=1000,tol=1e-8,plotConv=True,d=2):
+def runEigenSolver(H):
+    u,v = eig(H[0],H[1],H[2])
+    return -u,v
+
+def runOpt(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,maxIter=1000,tol=1e-8,plotConv=True,d=2):
     # Extract Inputs
     A,B = mps[0],mps[1]
     lBlock,rBlock = block[0],block[1]
@@ -127,7 +170,10 @@ def runOpt(mps,mpo,block,hBlock,E_init=0,maxBondDim=10,maxIter=1000,tol=1e-8,plo
         H = setupEigenProbSlow(hBlock,mpo)
         E,v = runEigenSolverSlow(H)
         E /= nBond
-        print('\tEnergy from Optimization = {}'.format(E))
+        Hf = setupEigenProb(mpo,hBlock,nextGuess)
+        Ef,vf = runEigenSolver(Hf)
+        Ef /= nBond
+        print('\tEnergy from Optimization = {},{}'.format(E,Ef))
         # ------------------------------------------------------------------------------
         # Reshape result into state
         (_,_,n1,_) = mpo.shape
@@ -145,6 +191,9 @@ def runOpt(mps,mpo,block,hBlock,E_init=0,maxBondDim=10,maxIter=1000,tol=1e-8,plo
         # Store left and right environments
         block = makeBlocks(mps,block=block)
         hBlock = makeBlocks(mps,mpo=[mpo,mpo],block=hBlock)
+        # -----------------------------------------------------------------------------
+        # Make next Initial Guess
+        nextGuess = makeNextGuess(A,S,B,a,maxBondDim)
         # ------------------------------------------------------------------------------
         # Check for convergence
         if np.abs(E - E_prev) < tol:
@@ -173,10 +222,10 @@ if __name__ == "__main__":
     ############################################
     # Run Current Calculation 1
     hmpo = createHamMPO(hamType,(alpha,beta,s+ds))
-    (E,mps,block,hBlock) = createInitMPS(hmpo,maxBondDim=10)
-    E1 = runOpt(mps,hmpo[2],block,hBlock,E_init=E)
+    (E,mps,block,hBlock,nextGuess) = createInitMPS(hmpo,maxBondDim=10)
+    E1 = runOpt(mps,hmpo[2],block,hBlock,nextGuess,E_init=E)
     # Run Current Calculation 2
     hmpo = createHamMPO(hamType,(alpha,beta,s-ds))
-    (E,mps,block,hBlock) = createInitMPS(hmpo,maxBondDim=10)
-    E2 = runOpt(mps,hmpo[2],block,hBlock,E_init=E)
+    (E,mps,block,hBlock,nextGuess) = createInitMPS(hmpo,maxBondDim=10)
+    E2 = runOpt(mps,hmpo[2],block,hBlock,nextGuess,E_init=E)
     print('Current = {}'.format((E1-E2)/(2*ds)))
