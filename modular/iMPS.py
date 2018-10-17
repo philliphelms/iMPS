@@ -1,157 +1,182 @@
 import numpy as np
 from pyscf.lib.linalg_helper import eig
-from numpy import einsum
+from pyscf.lib.numpy_helper import einsum
 from scipy import linalg as la
-import matplotlib.pyplot as plt
-import iMPO
+from iMPO import *
 
+def sortEig(mat,left=True,n_eig=1):
+    # Return n_eig smallest eigenvalues and associated eigenvectors
+    if left:
+        e0,lv,rv = la.eig(mat,left=True)
+        inds = np.argsort(e0)[::-1]
+        print(e0)
+        e0 = e0[inds[:n_eig]]
+        lv = lv[:,inds[:n_eig]]
+        rv = rv[:,inds[:n_eig]]
+        return (e0,lv,rv)
+    else:
+        e0,rv = la.eig(mat)
+        inds = np.argsort(e0)[::-1]
+        e0 = e0[inds[:n_eig]]
+        rv = rv[:,inds[:n_eig]]
+        return e0,rv
 
-def mpo2op():
-    H = np.zeros((2**2,2**2))
-    currH = np.zeros((2**2,2**2))
-    rDenH = np.zeros((2**2,2**2))
-    lDenH = np.zeros((2**2,2**2))
-    occ = np.zeros((2**2,2),dtype=int)
-    sum_occ = np.zeros(2**2,dtype=int)
-    for i in range(2**2):
-        occ[i,:] = np.asarray(list(map(lambda x: int(x),'0'*(2-len(bin(i)[2:]))+bin(i)[2:])))
-        #print(occ[i,:])
-        sum_occ[i] = np.sum(occ[i,:])
-        # Calculate Hamiltonian
-    for i in range(2**2):
-        i_occ = occ[i,:]
-        for j in range(2**2):
-            j_occ = occ[j,:]
-            tmp_mat0 = np.array([[1]])
-            currMat0 = np.array([[1]])
-            rDenMat0 = np.array([[1]])
-            lDenMat0 = np.array([[1]])
-            for k in range(2):
-                tmp_mat0 = einsum('ij,jk->ik',tmp_mat0,W[k][:,:,i_occ[k],j_occ[k]])
-                currMat0 = einsum('ij,jk->ik',currMat0,currentOp[k][:,:,i_occ[k],j_occ[k]])
-                rDenMat0 = einsum('ij,jk->ik',rDenMat0,densityOp[k][:,:,i_occ[k],j_occ[k]])
-                lDenMat0 = einsum('ij,jk->ik',lDenMat0,densityOp[k][:,:,i_occ[k],j_occ[k]])
-            H[i,j]     += tmp_mat0[[0]]
-            currH[i,j] += currMat0[[0]]
-            rDenH[i,j] += rDenMat0[[0]]
-            lDenH[i,j] += lDenMat0[[0]]
+def createInitMPS(W,maxBondDim=10,d=2):
+    H = mpo2mat([W[0],W[1]])
     # Diagonalize Hamiltonian
-    u,lpsi,psi = la.eig(H,left=True)
-    inds = np.argsort(u)
-    u = u[inds[-1]]
-    psi = psi[:,inds[-1]]
-    lpsi = lpsi[:,inds[-1]]
+    (e0,lwf,rwf) = sortEig(H)
     # Ensure Proper Normalization
     # <-|R> = 1
     # <L|R> = 1
-    psi = psi/np.sum(psi)
-    lpsi = lpsi/np.sum(lpsi*psi)
-
-def decomposeState():
+    rwf = rwf/np.sum(rwf)
+    lwf = lwf/np.sum(lwf*rwf)
+    #print('\nExact Diagonalization Energy: {}'.format(e0))
+    ############################################
     # Reshape wavefunction for SVD
-    psi = np.reshape(psi,(2,2))
-    lpsi = np.reshape(lpsi,(2,2))
+    rpsi = np.reshape(rwf,(2,2))
+    lpsi = np.reshape(lwf,(2,2))
+    ############################################
     # Do SVD of initial unit cell
+    a = [1,min(maxBondDim,d)]
+    (A,S,B) = decompose(rpsi,a)
+    print('After SVD, Energy = {}'.format(einsum('jik,k,lkm,nojr,oplt,rqs,s,tsu->',A.conj(),S,B.conj(),W[0],W[1],A,S,B)/
+                                          einsum('jik,k,lkm,jno,o,lop->',A.conj(),S,B.conj(),A,S,B)))
+    ############################################
+    # Store left and right environments
+    block = makeBlocks([A,B])
+    hBlock = makeBlocks([A,B],mpo=[W[0],W[1]])
+    E = einsum('ijk,i,k,ijk->',hBlock[0],S,S,hBlock[1]) / einsum('ko,k,o,ko->',block[0],S,S,block[1])
+    print('After Blocking, Energy = {}'.format(E))
+    ############################################
+    return (E,[A,B],block,hBlock)
+
+def makeBlocks(mps,mpo=None,block=None):
+    if block is None:
+        if mpo is None:
+            block = [np.array([[1.]]),np.array([[1.]])]
+        else:
+            block = [np.array([[[1.]]]),np.array([[[1.]]])]
+    if mpo is None:
+        block[0] = einsum('ij,kil,kim->lm',block[0],mps[0].conj(),mps[0])
+        block[1] = einsum('ijk,ilm,km->jl',mps[1].conj(),mps[1],block[1])
+    else:
+        block[0] = einsum('ijk,lim,jnlo,okp->mnp',block[0],mps[0].conj(),mpo[0],mps[0])
+        block[1] = einsum('ijk,lmin,nop,kmp->jlo',mps[1].conj(),mpo[1],mps[1],block[1])
+    return block
+
+def decompose(psi,a,d=2):
+    # Canonicalize state
     U,S,V = np.linalg.svd(psi)
-    a = [1,min(maxBondDim,d)] # Keep Track of bond dimensions
-    A = np.reshape(U,(a[0],d,a[1]))
+    A = np.reshape(U,(a[0],d,-1))
+    A = A[:,:,:a[1]]
     A = np.swapaxes(A,0,1)
-    B = np.reshape(V,(a[1],d,a[0]))
+    B = np.reshape(V,(-1,d,a[0]))
+    B = B[:a[1],:,:]
     B = np.swapaxes(B,0,1)
-    # Left
-    Ul,Sl,Vl = np.linalg.svd(lpsi)
+    S = S[:a[1]]
+    return (A,S,B)
+
+def initializePlot(plotConv):
+    if plotConv:
+        import matplotlib.pyplot as plt
+        fig = plt.figure()
+        ax1 = plt.subplot(121)
+        ax2 = plt.subplot(122)
+        return (fig,ax1,ax2)
+    else: return None
+
+def updatePlot(plotConv,f,Evec,nVec):
+    if plotConv:
+        f[1].cla()
+        f[1].plot(nVec,Evec,'r.')
+        f[2].cla()
+        f[2].semilogy(nVec[:-1],np.abs(Evec[:-1]-Evec[-1]),'r.')
+        plt.pause(0.01)
+
+
+def setupEigenProbSlow(HBlock,mpo):
+    H = einsum('ijk,jlmn,lopq,ros->mpirnqks',HBlock[0],mpo,mpo,HBlock[1])
+    (n1,n2,n3,n4,n5,n6,n7,n8) = H.shape
+    H = np.reshape(H,(n1*n2*n3*n4,n5*n6*n7*n8))
+    return H
+
+def runEigenSolverSlow(H):
+    u,v = sortEig(H,left=False)
+    return u,v
+
+def runOpt(mps,mpo,block,hBlock,E_init=0,maxBondDim=10,maxIter=1000,tol=1e-8,plotConv=True,d=2):
+    # Extract Inputs
+    A,B = mps[0],mps[1]
+    lBlock,rBlock = block[0],block[1]
+    lHBlock,rHBlock = hBlock[0],hBlock[1]
+    # Set up Iterative Loop Parameters
+    fig = initializePlot(plotConv)
+    converged = False
+    iterCnt = 0
+    nBond = 1
+    E_prev = E_init
     a = [1,min(maxBondDim,d)] # Keep Track of bond dimensions
-    Al = np.reshape(Ul,(a[0],d,a[1]))
-    Al = np.swapaxes(Al,0,1)
-    Bl = np.reshape(Vl,(a[1],d,a[0]))
-    Bl = np.swapaxes(Bl,0,1)
+    Evec = []
+    nBondVec = []
+    while not converged:
+        nBond += 2
+        a[0] = a[1]
+        a[1] = min(maxBondDim,a[0]*2)
+        # ------------------------------------------------------------------------------
+        # Run Eigensolver
+        H = setupEigenProbSlow(hBlock,mpo)
+        E,v = runEigenSolverSlow(H)
+        E /= nBond
+        print('\tEnergy from Optimization = {}'.format(E))
+        # ------------------------------------------------------------------------------
+        # Reshape result into state
+        (_,_,n1,_) = mpo.shape
+        (_,_,n2,_) = mpo.shape
+        (n3,_,_) = hBlock[0].shape
+        (n4,_,_) = hBlock[1].shape
+        psi = np.reshape(v,(n1,n2,n3,n4)) # s_l s_(l+1) a_(l-1) a_(l+1)
+        psi = np.transpose(psi,(2,0,1,3)) # a_(l-1) s_l a_(l+1) s_(l+1)
+        psi = np.reshape(psi,(n3*n1,n4*n2))
+        # ------------------------------------------------------------------------------
+        # Perform USV Decomposition
+        (A,S,B) = decompose(psi,a,d=2)
+        mps = [A,B]
+        # -----------------------------------------------------------------------------
+        # Store left and right environments
+        block = makeBlocks(mps,block=block)
+        hBlock = makeBlocks(mps,mpo=[mpo,mpo],block=hBlock)
+        # ------------------------------------------------------------------------------
+        # Check for convergence
+        if np.abs(E - E_prev) < tol:
+            converged = True
+            print('System Converged {} {}'.format(E,E_prev))
+        elif iterCnt == maxIter:
+            converged = True
+            print('Convergence not acheived')
+        else:
+            E_prev = E
+            iterCnt += 1
+            Evec.append(E)
+            nBondVec.append(nBond)
+            updatePlot(plotConv,fig,Evec,nBondVec)
+    return E
 
-def initializeContainers():
-    # Set initial left and right containers
-    LHBlock = np.array([[[1.]]])
-    RHBlock = np.array([[[1.]]])
-    LHBlockl= np.array([[[1.]]])
-    RHBlockl= np.array([[[1.]]])
-    LBlocklr = np.array([[1.]])
-    RBlocklr = np.array([[1.]])
-    LCurrBlock = np.array([[[1.]]])
-    RCurrBlock = np.array([[[1.]]])
-
-def evaluateOperator()
-    tmp1 = einsum('ijk , lim, m->jklm',LCurrBlock, Al.conj(),   Sl.conj())
-    tmp2 = einsum('jklm, jnlo  ->kmno',tmp1      , currentOp[0]          )
-    tmp3 = einsum('kmno, okp, p->mnp ',tmp2      , A,           S        )
-    tmp4 = einsum('mnp , qmr   ->npqr',tmp3      , Bl.conj()             )
-    tmp5 = einsum('npqr, nsqt  ->prst',tmp4      , currentOp[1]          )
-    tmp6 = einsum('prst, tpu   ->rsu ',tmp5      , B                     )
-    curr = einsum('rsu , rsu   ->    ',tmp6      , RCurrBlock            )
-
-def evaluateOperators():
-    # total current ---------
-    tmp1 = einsum('ijk , lim, m->jklm',LCurrBlock, Al.conj(),   Sl.conj())
-    tmp2 = einsum('jklm, jnlo  ->kmno',tmp1      , currentOp[0]          )
-    tmp3 = einsum('kmno, okp, p->mnp ',tmp2      , A,           S        )
-    tmp4 = einsum('mnp , qmr   ->npqr',tmp3      , Bl.conj()             )
-    tmp5 = einsum('npqr, nsqt  ->prst',tmp4      , currentOp[1]          )
-    tmp6 = einsum('prst, tpu   ->rsu ',tmp5      , B                     )
-    curr = einsum('rsu , rsu   ->    ',tmp6      , RCurrBlock            )
-    # Left  Density ---------
-    tmp1 = einsum('ik  , lim, m->klm ',LBlocklr, Al.conj(),    Sl.conj())
-    tmp2 = einsum('klm , jnlo  ->kmno',tmp1,     densityOp[0]          )
-    tmp3 = einsum('kmno, okp, p->mnp ',tmp2,     A,            S        )
-    tmp4 = einsum('mnp , qmr   ->npqr',tmp3,     Bl.conj()              )
-    tmp5 = einsum('npqr, nsqt  ->prst',tmp4,     densityOp[1]          )
-    tmp6 = einsum('prst, tpu   ->su  ',tmp5,     B                      )
-    denl = einsum('ru  , ru    ->    ',tmp6,     RBlocklr               )
-    # Right Density ---------
-    tmp1 = einsum('ik  , lim, m->klm ',LBlocklr, Al.conj(),    Sl.conj())
-    tmp2 = einsum('klm , jnlo  ->kmno',tmp1,     densityOp[1]          )
-    tmp3 = einsum('kmno, okp, p->mnp ',tmp2,     A,            S        )
-    tmp4 = einsum('mnp , qmr   ->npqr',tmp3,     Bl.conj()              )
-    tmp5 = einsum('npqr, nsqt  ->prst',tmp4,     densityOp[0]          )
-    tmp6 = einsum('prst, tpu   ->su  ',tmp5,     B                      )
-    denr = einsum('ru  , ru    ->    ',tmp6,     RBlocklr               )
-
-def storeEnv():
-    LHBlock= einsum('ijk,lim,jnlo,okp->mnp',LHBlock,A.conj(),W[0],A)
-    RHBlock= einsum('ijk,lmin,nop,kmp->jlo',B.conj(),W[1],B,RHBlock)
-    # Left
-    LHBlockl= einsum('ijk,lim,jnlo,okp->mnp',LHBlockl,Al.conj(),Wl[0],Al)
-    RHBlockl= einsum('ijk,lmin,nop,kmp->jlo',Bl.conj(),Wl[1],Bl,RHBlockl)
-    # Left Right
-    LBlocklr  = einsum('jl,ijk,ilm->km',LBlocklr,Al.conj(),A)
-    RBlocklr  = einsum('op,nko,nmp->km',RBlocklr,Bl.conj(),B)
-    LCurrBlock= einsum('ijk,lim,jnlo,okp->mnp',LCurrBlock,Al.conj(),currentOp[0],A)
-    RCurrBlock= einsum('ijk,lmin,nop,kmp->jlo',Bl.conj(),currentOp[1],B,RCurrBlock)
-
-def makeGuess():
-    pass
-
-def kernel(hamType,params,D=10,maxIter=10,tol=1e-5):
-    # Get MPOs
-    H = iMPO.getHam(hamType,(a,b,s))
-    currOp = iMPO.currOp(hamType,(a,b,s))
-    densOp = iMPO.densOp(hamType,(a,b,s))
-    # 
-
-if __name__ is "__main__":
-    # Model Parameters:
+if __name__ == "__main__":
+    ############################################
+    # Inputs
+    alpha = 0.35
+    beta = 2./3.
+    p = 1.
+    s = -1.
+    ds = 0.01
     hamType = 'tasep'
-    a = 0.8
-    b = 2./3.
-    s = 0.
-    tol = 1e-5
-    kernel(hamType,(a,b,s))
-
-
-
-
-
-
-
-
-
-
-
-
-
+    ############################################
+    # Run Current Calculation 1
+    hmpo = createHamMPO(hamType,(alpha,beta,s+ds))
+    (E,mps,block,hBlock) = createInitMPS(hmpo,maxBondDim=10)
+    E1 = runOpt(mps,hmpo[2],block,hBlock,E_init=E)
+    # Run Current Calculation 2
+    hmpo = createHamMPO(hamType,(alpha,beta,s-ds))
+    (E,mps,block,hBlock) = createInitMPS(hmpo,maxBondDim=10)
+    E2 = runOpt(mps,hmpo[2],block,hBlock,E_init=E)
+    print('Current = {}'.format((E1-E2)/(2*ds)))
