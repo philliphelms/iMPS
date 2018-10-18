@@ -53,18 +53,14 @@ def createInitMPS(W,maxBondDim=10,d=2):
     # Do SVD of initial unit cell
     a = [1,min(maxBondDim,d)]
     (A,S,B) = decompose(rpsi,a)
-    print('After SVD, Energy = {}'.format(einsum('jik,k,lkm,nojr,oplt,rqs,s,tsu->',A.conj(),S,B.conj(),W[0],W[1],A,S,B)/
-                                          einsum('jik,k,lkm,jno,o,lop->',A.conj(),S,B.conj(),A,S,B)))
     ############################################
     # Store left and right environments
     block = makeBlocks([A,B])
     hBlock = makeBlocks([A,B],mpo=[W[0],W[1]])
     E = einsum('ijk,i,k,ijk->',hBlock[0],S,S,hBlock[1]) / einsum('ko,k,o,ko->',block[0],S,S,block[1])
-    print('After Blocking, Energy = {}'.format(E))
     ############################################
     # Create the next guess
     nextGuess = makeNextGuess(A,S,B,a,maxBondDim)
-    print(nextGuess.shape)
     return (E,[A,B],block,hBlock,nextGuess)
 
 def makeBlocks(mps,mpo=None,block=None):
@@ -74,11 +70,25 @@ def makeBlocks(mps,mpo=None,block=None):
         else:
             block = [np.array([[[1.]]]),np.array([[[1.]]])]
     if mpo is None:
-        block[0] = einsum('ij,kil,kim->lm',block[0],mps[0].conj(),mps[0])
-        block[1] = einsum('ijk,ilm,km->jl',mps[1].conj(),mps[1],block[1])
+        #print(np.sum(np.sum(np.abs(einsum('ilk,ilm->km',einsum('jl,ijk->ilk',block[0],mps[0].conj()),mps[0])-
+        #                           einsum('ij,kil,kim->lm',block[0],mps[0].conj(),mps[0])))))
+        #print(np.sum(np.sum(np.abs(einsum('nkp,nmp->km',einsum('op,nko->nkp',block[1],mps[1].conj()),mps[1])-
+        #                           einsum('ijk,ilm,km->jl',mps[1].conj(),mps[1],block[1])))))
+        tmp1 = einsum('jl,ijk->ilk',block[0],mps[0].conj())
+        block[0] = einsum('ilk,ilm->km',tmp1,mps[0])
+        tmp1 = einsum('op,nko->nkp',block[1],mps[1].conj())
+        block[1] = einsum('nkp,nmp->km',tmp1,mps[1])
     else:
-        block[0] = einsum('ijk,lim,jnlo,okp->mnp',block[0],mps[0].conj(),mpo[0],mps[0])
-        block[1] = einsum('ijk,lmin,nop,kmp->jlo',mps[1].conj(),mpo[1],mps[1],block[1])
+        #print(np.sum(np.sum(np.abs(einsum('kmno,okp->mnp',einsum('jklm,jnlo->kmno',einsum('ijk,lim->jklm',block[0],mps[0].conj()),mpo[0]),mps[0])-
+        #                           einsum('ijk,lim,jnlo,okp->mnp',block[0],mps[0].conj(),mpo[0],mps[0])))))
+        #print(np.sum(np.sum(np.abs(einsum('iklo,ijk->jlo',einsum('kmno,lmin->iklo',einsum('nop,kmp->kmno',mps[1],block[1]),mpo[1]),mps[1].conj())-
+        #                           einsum('ijk,lmin,nop,kmp->jlo',mps[1].conj(),mpo[1],mps[1],block[1])))))
+        tmp1 = einsum('ijk,lim->jklm',block[0],mps[0].conj())
+        tmp2 = einsum('jklm,jnlo->kmno',tmp1,mpo[0])
+        block[0] = einsum('kmno,okp->mnp',tmp2,mps[0])
+        tmp1 = einsum('nop,kmp->kmno',mps[1],block[1])
+        tmp2 = einsum('kmno,lmin->iklo',tmp1,mpo[1])
+        block[1] = einsum('iklo,ijk->jlo',tmp2,mps[1].conj())
     return block
 
 def makeNextGuess(A,S,B,a,maxBondDim=10):
@@ -119,7 +129,6 @@ def updatePlot(plotConv,f,Evec,nVec):
         f[2].semilogy(nVec[:-1],np.abs(Evec[:-1]-Evec[-1]),'r.')
         plt.pause(0.01)
 
-
 def setupEigenProbSlow(HBlock,mpo):
     H = einsum('ijk,jlmn,lopq,ros->mpirnqks',HBlock[0],mpo,mpo,HBlock[1])
     (n1,n2,n3,n4,n5,n6,n7,n8) = H.shape
@@ -147,7 +156,14 @@ def runEigenSolver(H):
     u,v = eig(H[0],H[1],H[2])
     return -u,v
 
-def runOpt(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,maxIter=1000,tol=1e-8,plotConv=True,d=2):
+def calcEntanglement(S):
+    entSpect = -S**2*np.log2(S**2)
+    for i in range(len(entSpect)):
+        if np.isnan(entSpect[i]): entSpect[i] = 0
+    entEntr = np.sum(entSpect)
+    return entEntr,entSpect
+
+def runOpt(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,maxIter=10000,tol=1e-8,plotConv=True,d=2):
     # Extract Inputs
     A,B = mps[0],mps[1]
     lBlock,rBlock = block[0],block[1]
@@ -167,13 +183,9 @@ def runOpt(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,maxIter=1000,to
         a[1] = min(maxBondDim,a[0]*2)
         # ------------------------------------------------------------------------------
         # Run Eigensolver
-        H = setupEigenProbSlow(hBlock,mpo)
-        E,v = runEigenSolverSlow(H)
+        H = setupEigenProb(mpo,hBlock,nextGuess)
+        E,v = runEigenSolver(H)
         E /= nBond
-        Hf = setupEigenProb(mpo,hBlock,nextGuess)
-        Ef,vf = runEigenSolver(Hf)
-        Ef /= nBond
-        print('\tEnergy from Optimization = {},{}'.format(E,Ef))
         # ------------------------------------------------------------------------------
         # Reshape result into state
         (_,_,n1,_) = mpo.shape
@@ -187,6 +199,7 @@ def runOpt(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,maxIter=1000,to
         # Perform USV Decomposition
         (A,S,B) = decompose(psi,a,d=2)
         mps = [A,B]
+        EE,_ = calcEntanglement(S)
         # -----------------------------------------------------------------------------
         # Store left and right environments
         block = makeBlocks(mps,block=block)
@@ -196,6 +209,7 @@ def runOpt(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,maxIter=1000,to
         nextGuess = makeNextGuess(A,S,B,a,maxBondDim)
         # ------------------------------------------------------------------------------
         # Check for convergence
+        print('\tEnergy from Optimization = {}\tvonNeumann Entropy = {}'.format(E,EE))
         if np.abs(E - E_prev) < tol:
             converged = True
             print('System Converged {} {}'.format(E,E_prev))
@@ -216,16 +230,17 @@ if __name__ == "__main__":
     alpha = 0.35
     beta = 2./3.
     p = 1.
-    s = -1.
+    s = 10.
     ds = 0.01
     hamType = 'tasep'
+    mbd = 10
     ############################################
     # Run Current Calculation 1
     hmpo = createHamMPO(hamType,(alpha,beta,s+ds))
-    (E,mps,block,hBlock,nextGuess) = createInitMPS(hmpo,maxBondDim=10)
-    E1 = runOpt(mps,hmpo[2],block,hBlock,nextGuess,E_init=E)
+    (E,mps,block,hBlock,nextGuess) = createInitMPS(hmpo)
+    E1 = runOpt(mps,hmpo[2],block,hBlock,nextGuess,E_init=E,maxBondDim=mbd)
     # Run Current Calculation 2
     hmpo = createHamMPO(hamType,(alpha,beta,s-ds))
-    (E,mps,block,hBlock,nextGuess) = createInitMPS(hmpo,maxBondDim=10)
-    E2 = runOpt(mps,hmpo[2],block,hBlock,nextGuess,E_init=E)
+    (E,mps,block,hBlock,nextGuess) = createInitMPS(hmpo)
+    E2 = runOpt(mps,hmpo[2],block,hBlock,nextGuess,E_init=E,maxBondDim=mbd)
     print('Current = {}'.format((E1-E2)/(2*ds)))
