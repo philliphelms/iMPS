@@ -104,6 +104,10 @@ def createInitMPS(W,maxBondDim=10,d=2):
     A = np.swapaxes(A,0,1)
     B = np.reshape(V,(a[1],d,a[0]))
     B = np.swapaxes(B,0,1)
+    print(rpsi)
+    print(A)
+    print(S)
+    print(B)
     print('After SVD, Energy = {}'.format(einsum('jik,k,lkm,nojr,oplt,rqs,s,tsu->',A.conj(),S,B.conj(),W[0],W[1],A,S,B)/
                                           einsum('jik,k,lkm,jno,o,lop->',A.conj(),S,B.conj(),A,S,B)))
     # Store left and right environments
@@ -159,6 +163,7 @@ def runOpt(MPS,Block,HBlock,maxBondDim=10,maxIter=1000,tol=1e-8,plotConv=True,d=
         # Determine Hamiltonian
         H = einsum('ijk,jlmn,lopq,ros->mpirnqks',LHBlock,W[2],W[2],RHBlock)
         (n1,n2,n3,n4,n5,n6,n7,n8) = H.shape
+        print(n1,n2,n3,n4)
         H = np.reshape(H,(n1*n2*n3*n4,n5*n6*n7*n8))
         # -----------------------------------------------------------------------------
         # Solve Eigenproblem

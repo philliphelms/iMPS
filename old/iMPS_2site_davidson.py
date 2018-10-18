@@ -19,14 +19,14 @@ import matplotlib.pyplot as plt
 
 ############################################
 # Inputs
-alpha = 0.8
+alpha = 0.35
 beta = 2./3.
 gamma = 0.
 delta = 0. 
-p = 1.
+p = 1.01
 q = 0.
 s = -1.
-maxBondDim = 100
+maxBondDim = 10
 maxIter = 2
 d = 2
 tol = 1e-8
@@ -157,14 +157,17 @@ while not converged:
     initGuess = einsum('ijk,lkm->iljm',Aguess,Bguess)
     guessShape = initGuess.shape
     initGuess = initGuess.ravel()
+    print(guessShape)
     # -----------------------------------------------------------------------------
     # Determine Hamiltonian Function
     def Hx(x):
+        print(x.shape)
         x_reshape = np.reshape(x,guessShape)
         tmp1 = einsum('ijk,nqks->ijnqs',LHBlock,x_reshape) # Could be 'ijk,mpir->jkmpr'
         tmp2 = einsum('jlmn,ijnqs->ilmqs',W[2],tmp1)
         tmp3 = einsum('lopq,ilmqs->imops',W[2],tmp2)
         finalVec = einsum('ros,imops->mpir',RHBlock,tmp3)
+        print(finalVec.ravel().shape)
         return -finalVec.ravel()
     def precond(dx,e,x0):
         return dx

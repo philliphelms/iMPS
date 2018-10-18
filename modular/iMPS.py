@@ -307,10 +307,9 @@ def runOptLR(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,ma
         blockLR= makeBlocks(mps,lmps=mpsl)
         hBlockLR= makeBlocks(mps,lmps=mpsl,mpo=[mpo,mpo])
         print(E,El)
-        E = einsum('ijk,i,k,ijk->',hBlock[0],S,S,hBlock[1]) / einsum('ko,k,o,ko->',block[0],S,S,block[1])
-        El = einsum('ijk,i,k,ijk->',hBlockL[0] ,Sl,Sl,hBlockL[1] ) / einsum('ko,k,o,ko->',blockL[0] ,Sl,Sl,blockL[1] )
-        Elr= einsum('ijk,i,k,ijk->',hBlockLR[0],Sl,S ,hBlockLR[1]) / einsum('ko,k,o,ko->',blockLR[0],Sl,S ,blockLR[1])
-        #print('LR Agreement: {},{},{}'.format(E,El,Elr))
+        E = einsum('ijk,i,k,ijk->',hBlock[0],S,S,hBlock[1]) / einsum('ko,k,o,ko->',block[0],S,S,block[1]) / nBond
+        El = einsum('ijk,i,k,ijk->',hBlockL[0] ,Sl,Sl,hBlockL[1] ) / einsum('ko,k,o,ko->',blockL[0] ,Sl,Sl,blockL[1] ) / nBond
+        Elr= einsum('ijk,i,k,ijk->',hBlockLR[0],S ,Sl,hBlockLR[1]) / einsum('ko,k,o,ko->',blockLR[0],S ,Sl,blockLR[1]) / nBond
         # -----------------------------------------------------------------------------
         # Make next Initial Guess
         nextGuess = makeNextGuess(A,S,B,a,maxBondDim)
@@ -345,7 +344,7 @@ if __name__ == "__main__":
     alpha = 0.35
     beta = 2./3.
     p = 1.
-    s = 0.
+    s = -1.
     ds = 0.01
     hamType = 'tasep'
     mbd = 100
@@ -353,6 +352,11 @@ if __name__ == "__main__":
     # Run Current Calculation 1
     hmpo = createHamMPO(hamType,(alpha,beta,s))
     hmpol= createHamMPO(hamType,(alpha,beta,s),conjTrans=True)
+    (E,mps,block,hBlock,nextGuess) = createInitMPS(hmpo,Wl=hmpol)
+    E0 = runOpt(mps,[hmpo[2],hmpol[2]],block,hBlock,nextGuess,E_init=E,maxBondDim=mbd)
+    # Run Current Calculation 2
+    hmpo = createHamMPO(hamType,(alpha,beta,1.))
+    hmpol= createHamMPO(hamType,(alpha,beta,1.),conjTrans=True)
     (E,mps,block,hBlock,nextGuess) = createInitMPS(hmpo,Wl=hmpol)
     E0 = runOpt(mps,[hmpo[2],hmpol[2]],block,hBlock,nextGuess,E_init=E,maxBondDim=mbd)
     # Run Current Calculation 1
