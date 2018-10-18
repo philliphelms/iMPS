@@ -5,7 +5,7 @@ from scipy import linalg as la
 import matplotlib.pyplot as plt
 
 
-def createHamMPO(hamType,hamParams):
+def createHamMPO(hamType,hamParams,conjTrans=False):
     ############################################
     # Determine MPO
     Sp = np.array([[0,1],[0,0]])
@@ -16,6 +16,7 @@ def createHamMPO(hamType,hamParams):
     z = np.array([[0,0],[0,0]])
     ham = []
     if hamType == 'tasep':
+        # Totally Asymmetric Simple Exclusion Process -----------------------------------------
         alpha = hamParams[0]
         beta = hamParams[1]
         s = hamParams[2]
@@ -23,6 +24,7 @@ def createHamMPO(hamType,hamParams):
         ham.insert(len(ham),np.array([[I],[Sm],[v],[beta*(np.exp(-s)*Sp-n)]]))
         ham.insert(len(ham),np.array([[I,z,z,z],[Sm,z,z,z],[v,z,z,z],[z,np.exp(-s)*Sp,-n,I]]))
     elif hamType == 'sep':
+        # Generic Simple Exclusion Process -----------------------------------------------------
         alpha = hamParams[0]
         delta = hamParams[1]
         gamma = hamParams[2]
@@ -50,6 +52,10 @@ def createHamMPO(hamType,hamParams):
                                   [q*n,      z,   z, z,  z, z],
                                   [z,        Sp, -n, Sm,-v, I]]))
     ############################################
+    # conjugate transpose operator if desired
+    if conjTrans:
+        for site in range(len(ham)):
+            ham[site] = np.transpose(ham[site],(0,1,3,2)).conj()
     return ham
 
 def mpo2mat(mpo):
