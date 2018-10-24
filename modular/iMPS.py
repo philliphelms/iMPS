@@ -118,16 +118,19 @@ def evaluateObservables(state,lstate,obsvs,block=[np.array([[1.]]),np.array([[1.
             # Evaluate Operator
             ob["val"] = einsum('ijk,ijk,i,k',ob["block"][0],ob["block"][1],state[1],lstate[1])/norm
 
-def normalizeOpVals(obsvs,normFactor):
+def normalizeObservables(obsvs,normFactor):
     for ob in obsvs:
         if ob["useBlock"] == False:
             if len(ob["mpo"]) == 2:
                 ob["val"] /= normFactor
+                ob["valVec"].append(ob["val"])
             else:
                 ob["val"][0] /= normFactor
                 ob["val"][1] /= normFactor
+                ob["valVec"].append(ob["val"][0])
         else:
             ob["val"] /= normFactor
+            ob["valVec"].append(ob["val"])
         if ob["print"]:
                 print('\t\t'+ob["name"]+' = '+'{}'.format(ob["val"]))
     return obsvs
@@ -287,9 +290,10 @@ def runOptR(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,max
             E_prev = E
             iterCnt += 1
             Evec.append(E)
+            EEvec.append(EE)
             nBondVec.append(nBond)
             updatePlot(plotConv,fig,Evec,nBondVec)
-    return E
+    return E,EE,obsvs
 
 def normEigVecs(v,vl):
     v /= np.sum(v)
@@ -316,8 +320,9 @@ def runOptLR(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,ma
     nBond = 1
     E_prev = E_init
     a = [1,min(maxBondDim,d)] # Keep Track of bond dimensions
-    Evec = []
-    nBondVec = []
+    Evec = [E_init]
+    EEvec= [0.]
+    nBondVec = [1]
     while not converged:
         nBond += 2
         a[0] = a[1]
@@ -364,7 +369,7 @@ def runOptLR(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,ma
         E = einsum('ijk,i,k,ijk->',hBlock[0],S,S,hBlock[1]) / einsum('ko,k,o,ko->',block[0],S,S,block[1]) / nBond
         El = einsum('ijk,i,k,ijk->',hBlockL[0] ,Sl,Sl,hBlockL[1] ) / einsum('ko,k,o,ko->',blockL[0] ,Sl,Sl,blockL[1] ) / nBond
         Elr= einsum('ijk,i,k,ijk->',hBlockLR[0],S ,Sl,hBlockLR[1]) / einsum('ko,k,o,ko->',blockLR[0],S ,Sl,blockLR[1]) / nBond
-        obsvs = normalizeOpVals(obsvs,einsum('ko,k,o,ko->',blockLR[0],S ,Sl,blockLR[1]))
+        obsvs = normalizeObservables(obsvs,einsum('ko,k,o,ko->',blockLR[0],S ,Sl,blockLR[1]))
         # -----------------------------------------------------------------------------
         # Make next Initial Guess
         nextGuess = makeNextGuess(A,S,B,a,maxBondDim)
@@ -382,9 +387,10 @@ def runOptLR(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,ma
             E_prev = E
             iterCnt += 1
             Evec.append(E)
+            EEvec.append(EE)
             nBondVec.append(nBond)
             updatePlot(plotConv,fig,Evec,nBondVec)
-    return E
+    return Evec,EEvec,obsvs
 
 def runOpt(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,maxIter=10000,tol=1e-10,plotConv=True,d=2,obsvs=None):
     if len(mpo) == 2:
@@ -393,23 +399,73 @@ def runOpt(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,maxI
         E = runOptR(mps,mpo,block,hBlock,nextGuess,E_init,maxBondDim,minIter,maxIter,tol,plotConv,d,obsvs)
     return E
 
-if __name__ == "__main__":
-    ############################################
-    # Inputs
-    alpha = 0.5
-    beta = 0.5
-    p = 1.
-    s = -1.
-    ds = 0.01
-    hamType = 'tasep'
-    mbd = 10
-    ############################################
-    # Run Current Calculation 1
-    hmpo = createHamMPO(hamType,(alpha,beta,s))
-    hmpol= createHamMPO(hamType,(alpha,beta,s),conjTrans=True)
-    currGlOp = {"mpo": createGlobalCurrMPO(hamType,(alpha,beta,s)),"useBlock":True, "block":[None]*2,"print":True,"name":"Global Current","val":None}
-    currLoOp = {"mpo": createLocalCurrMPO( hamType,(alpha,beta,s)),"useBlock":False,"block":[None]*2,"print":True,"name":"Local Current","val":None}
-    densOp   = {"mpo": createLocalDensMPO(),                       "useBlock":False,"block":[None]*2,"print":True,"name":"Local Density","val":None}
-    obsvs = [currGlOp,currLoOp,densOp]
+def kernel(hamType='tasep',hamParams=(0.35,2./3.,-1),maxBondDim=100,minIter=199,maxIter=200,tol=1e-10,plotConv=False,d=2):
+    hmpo = createHamMPO(hamType,hamParams)
+    hmpol= createHamMPO(hamType,hamParams,conjTrans=True)
+    currLoOp = {"mpo": createLocalCurrMPO(hamType,hamParams),"useBlock":False,"block":[None]*2,"print":True,"name":"Local Current","val":None,"valVec":[]}
+    densOp   = {"mpo": createLocalDensMPO(),                       "useBlock":False,"block":[None]*2,"print":True,"name":"Local Density","val":None,"valVec":[]}
+    obsvs = [currLoOp,densOp]
     (E,mps,block,hBlock,nextGuess) = createInitMPS(hmpo,Wl=hmpol,obsvs=obsvs)
-    E0 = runOpt(mps,[hmpo[2],hmpol[2]],block,hBlock,nextGuess,E_init=E,maxBondDim=mbd,obsvs=obsvs)
+    E,EE,obsvs = runOpt(mps,[hmpo[2],hmpol[2]],block,hBlock,nextGuess,E_init=E,maxBondDim=maxBondDim,obsvs=obsvs,minIter=minIter,maxIter=maxIter,tol=tol,plotConv=plotConv,d=d)
+    return E,EE,obsvs[0]["valVec"],obsvs[1]["valVec"]
+
+if __name__ == "__main__":
+    # Run a tasep test to see how we approach the TDL
+    alpha_vec = np.array([0.01,0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5,0.55,0.6,0.65,0.7,0.75,0.8,0.85,0.9,0.95,0.99])
+    beta_vec =  np.array([0.01,0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5,0.55,0.6,0.65,0.7,0.75,0.8,0.85,0.9,0.95,0.99])
+    mbdVec = np.array([2,4])#,16,32,64,128])
+    maxIter = 10
+    s = 0.
+    J = np.zeros((len(mbdVec),maxIter+1,len(alpha_vec),len(beta_vec)))
+    rho=np.zeros((len(mbdVec),maxIter+1,len(alpha_vec),len(beta_vec)))
+    EE =np.zeros((len(mbdVec),maxIter+1,len(alpha_vec),len(beta_vec)))
+    Jinf = np.zeros((len(alpha_vec),len(beta_vec)))
+    rhoinf=np.zeros((len(alpha_vec),len(beta_vec)))
+    for i,alpha in enumerate(alpha_vec):
+        for j,beta in enumerate(beta_vec):
+            for k,mbd in enumerate(mbdVec):
+                print('Working With D = {}'.format(mbd))
+                Evec,EEvec,currVec,densVec = kernel(hamType='tasep',hamParams=(alpha,beta,s),maxBondDim=mbd,minIter=maxIter-1,maxIter=maxIter,tol=1e-10,plotConv=False)
+                J[k,:,i,j] = currVec
+                rho[k,:,i,j]=densVec
+                EE[k,:,i,j] =EEvec
+                if (alpha > 0.5) and (beta > 0.5):
+                    # MC Phase
+                    Jinf[i,j] = 0.25
+                    rhoinf[i,j] = 0.5
+                elif (beta > alpha):
+                    Jinf[i,j] = alpha*(1-alpha)
+                    rhoinf[i,j] = alpha
+                else:
+                    Jinf[i,j] = beta*(1-beta)
+                    rhoinf[i,j] = beta
+            np.savez('convData',J,rho,Jinf,rhoinf,alpha_vec,beta_vec,mbdVec,maxIter,s,EE)
+"""
+# Add plots
+plt.figure(f2.number)
+for i in range(len(mbdVec))[::-1]:
+ax2.plot(np.arange(0,(maxIter+1)*2,2),mbdVec[i]*np.ones(len(J[i,:])),J[i,:])
+ax2.set_xlabel('Number of Bonds')
+ax2.set_ylabel('Maximum D')
+ax2.set_zlabel('Current')
+plt.pause(0.01)
+plt.figure(f3.number)
+for i in range(len(mbdVec))[::-1]:
+ax3.plot(np.arange(0,(maxIter+1)*2,2),mbdVec[i]*np.ones(len(rho[i,:])),rho[i,:])
+ax3.set_xlabel('Number of Bonds')
+ax3.set_ylabel('Maximum D')
+ax3.set_zlabel('Density')
+plt.pause(0.01)
+plt.figure(f4.number)
+mbdMat,nBondMat = np.meshgrid(mbdVec,np.arange(0,(maxIter+1)*2,2))
+surf = ax4.pcolormesh(mbdMat,nBondMat,np.log(abs(J.T-Jinf.T)),linewidth=0,antialiased=False)
+ax4.set_xlabel('Maximum Bond Dimension')
+ax4.set_ylabel('Number of Bonds')
+plt.pause(0.01)
+plt.figure(f5.number)
+mbdMat,nBondMat = np.meshgrid(mbdVec,np.arange(0,(maxIter+1)*2,2))
+surf = ax5.pcolormesh(mbdMat,nBondMat,np.log(abs(rho.T-rhoinf.T)),linewidth=0,antialiased=False)
+ax5.set_xlabel('Maximum Bond Dimension')
+ax5.set_ylabel('Number of Bonds')
+plt.pause(0.01)
+"""

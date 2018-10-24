@@ -74,3 +74,72 @@ def mpo2mat(mpo):
                 tmp_mat = einsum('ij,jk->ik',tmp_mat,mpo[k][:,:,i_occ[k],j_occ[k]])
             mat[i,j] += tmp_mat[[0]]
     return mat
+
+def createGlobalCurrMPO(hamType,hamParams,conjTrans=False):
+    ############################################
+    # Determine MPO
+    Sp = np.array([[0,1],[0,0]])
+    Sm = np.array([[0,0],[1,0]])
+    n = np.array([[0,0],[0,1]])
+    v = np.array([[1,0],[0,0]])
+    I = np.array([[1,0],[0,1]])
+    z = np.array([[0,0],[0,0]])
+    ham = []
+    if hamType == 'tasep':
+        # Totally Asymmetric Simple Exclusion Process -----------------------------------------
+        alpha = hamParams[0]
+        beta = hamParams[1]
+        s = hamParams[2]
+        exp_alpha = alpha*np.exp(-s)
+        exp_beta = beta*np.exp(-s)
+        exp_p = np.exp(-s)
+        currMPO = [None]*3
+        currMPO[0] = np.array([[exp_alpha*Sm,exp_p*Sp,I]])
+        currMPO[1] = np.array([[I],[Sm],[exp_beta*Sp]])
+        currMPO[2] = np.array([[I ,       z, z],
+                               [Sm,       z, z],
+                               [z ,exp_p*Sp, I]])
+    elif hamType == 'sep':
+        # Generic Simple Exclusion Process -----------------------------------------------------
+        print('SEP Current Not Implemented') # PH - Fix this
+    ############################################
+    # conjugate transpose operator if desired
+    if conjTrans:
+        for site in range(len(ham)):
+            currMPO[site] = np.transpose(currMPO[site],(0,1,3,2)).conj()
+    return currMPO
+
+def createLocalCurrMPO(hamType,hamParams,conjTrans=False):
+    ############################################
+    # Determine MPO
+    Sp = np.array([[0,1],[0,0]])
+    Sm = np.array([[0,0],[1,0]])
+    n = np.array([[0,0],[0,1]])
+    v = np.array([[1,0],[0,0]])
+    I = np.array([[1,0],[0,1]])
+    z = np.array([[0,0],[0,0]])
+    ham = []
+    if hamType == 'tasep':
+        # Totally Asymmetric Simple Exclusion Process -----------------------------------------
+        alpha = hamParams[0]
+        beta = hamParams[1]
+        s = hamParams[2]
+        exp_alpha = alpha*np.exp(-s)
+        exp_beta = beta*np.exp(-s)
+        exp_p = np.exp(-s)
+        currMPO = [None]*2
+        currMPO[0] = np.array([[z ,exp_p*Sp, I]])
+        currMPO[1] = np.array([[I],[Sm],[z]])
+    elif hamType == 'sep':
+        # Generic Simple Exclusion Process -----------------------------------------------------
+        print('SEP Current Not Implemented') # PH - Fix this
+    ############################################
+    # conjugate transpose operator if desired
+    if conjTrans:
+        for site in range(len(ham)):
+            currMPO[site] = np.transpose(currMPO[site],(0,1,3,2)).conj()
+    return currMPO
+
+def createLocalDensMPO():
+    n = np.array([[0,0],[0,1]])
+    return np.array([[n]])
