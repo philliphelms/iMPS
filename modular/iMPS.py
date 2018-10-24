@@ -23,7 +23,6 @@ def sortEig(mat,left=True,n_eig=1):
     if left:
         e0,lv,rv = la.eig(mat,left=True)
         inds = np.argsort(e0)[::-1]
-        #print(e0)
         e0 = e0[inds[:n_eig]]
         lv = lv[:,inds[:n_eig]]
         rv = rv[:,inds[:n_eig]]
@@ -35,7 +34,7 @@ def sortEig(mat,left=True,n_eig=1):
         rv = rv[:,inds[:n_eig]]
         return e0,rv
 
-def createInitMPS(W,Wl=None,maxBondDim=10,d=2):
+def createInitMPS(W,Wl=None,maxBondDim=10,d=2,obsvs=None):
     left=True
     if Wl is None: left=False
     H = mpo2mat([W[0],W[1]])
@@ -44,9 +43,9 @@ def createInitMPS(W,Wl=None,maxBondDim=10,d=2):
     # Ensure Proper Normalization
     # <-|R> = 1
     # <L|R> = 1
+    print(e0)
     rwf = rwf/np.sum(rwf)
     lwf = lwf/np.sum(lwf*rwf)
-    #print('\nExact Diagonalization Energy: {}'.format(e0))
     ############################################
     # Reshape wavefunction for SVD
     rpsi = np.reshape(rwf,(2,2))
@@ -56,6 +55,12 @@ def createInitMPS(W,Wl=None,maxBondDim=10,d=2):
     a = [1,min(maxBondDim,d)]
     (A,S,B) = decompose(rpsi,a)
     if left: (Al,Sl,Bl) = decompose(lpsi,a)
+    ############################################
+    # Evaluate Observables
+    if left:
+        obVals = evaluateObservables([A,S,B],[Al,Sl,Bl],obsvs,init=True)
+    else:
+        obVals = evaluateObservables([A,S,B],[A,S,B],obsvs,init=True)
     ############################################
     # Store left and right environments
     block = makeBlocks([A,B])
@@ -72,11 +77,60 @@ def createInitMPS(W,Wl=None,maxBondDim=10,d=2):
         hBlock= [hBlock,hBlockL,hBlockLR]
         nextGuess = [nextGuess,nextGuessL]
         El = einsum('ijk,i,k,ijk->',hBlockL[0] ,Sl,Sl,hBlockL[1] ) / einsum('ko,k,o,ko->',blockL[0] ,Sl,Sl,blockL[1] )
-        Elr= einsum('ijk,i,k,ijk->',hBlockLR[0],S ,Sl,hBlockLR[1]) / einsum('ko,k,o,ko->',blockLR[0],S ,Sl,blockLR[1])
-        print('LR Agreement: {},{},{}'.format(E,El,Elr))
-    else:
-        print('LR Agreement: {}'.format(E))
+        Elr= einsum('ijk,i,k,ijk->',hBlockLR[0],Sl,S ,hBlockLR[1]) / einsum('ko,k,o,ko->',blockLR[0],Sl,S ,blockLR[1])
     return (E,[A,B],block,hBlock,nextGuess)
+
+def evaluateObservables(state,lstate,obsvs,block=[np.array([[1.]]),np.array([[1.]])],init=False,norm=1.):
+    for ob in obsvs:
+        if ob["useBlock"] == False:
+            if len(ob["mpo"]) == 2:
+                tmp1 = einsum('ik  , lim, m->klm ',block[0],  lstate[0].conj(), lstate[1].conj())
+                tmp2 = einsum('klm , jnlo  ->kmno',tmp1,          ob["mpo"][0]                  )
+                tmp3 = einsum('kmno, okp, p->mnp ',tmp2,              state[0],         state[1])
+                tmp4 = einsum('mnp , qmr   ->npqr',tmp3,      lstate[2].conj()                  )
+                tmp5 = einsum('npqr, nsqt  ->prt ',tmp4,          ob["mpo"][1]                  )
+                tmp6 = einsum('prt , tpu   ->ru  ',tmp5,              state[2]                  )
+                ob["val"] = einsum('ru  , ru    ->    ',tmp6,              block[1]             )/norm
+            else:
+                ob["val"] = [None]*2
+                tmp1 = einsum('ik  , lim, m->klm ',block[0],  lstate[0].conj(), lstate[1].conj())
+                tmp2 = einsum('klm , jnlo  ->kmo ',tmp1,             ob["mpo"]                  )
+                tmp3 = einsum('kmo , okp, p->mp  ',tmp2,              state[0],         state[1])
+                tmp4 = einsum('mp  , qmr   ->pqr ',tmp3,      lstate[2].conj()                  )
+                tmp5 = einsum('pqr , qpu   ->ru  ',tmp4,              state[2]                  )
+                ob["val"][0] = einsum('ru  , ru    ->    ',tmp5,              block[1]          )/norm
+                tmp1 = einsum('ik  , lim, m->klm ',block[0],  lstate[0].conj(), lstate[1].conj())
+                tmp2 = einsum('klm , lkn, n->mn  ',tmp1    ,          state[0],         state[1])
+                tmp3 = einsum('mn  , omp   ->nop ',tmp2    ,  lstate[2].conj()                  )
+                tmp4 = einsum('nop , qros  ->psn ',tmp3    ,         ob["mpo"]                  )
+                tmp5 = einsum('psn , snt   ->pt  ',tmp4    ,          state[2]                  )
+                ob["val"][1] = einsum('pt,pt->',tmp5,block[1])/norm
+        else:
+            # Select correct site operators
+            if init:
+                mpo = [ob["mpo"][0],ob["mpo"][1]]
+                newBlock = makeBlocks([state[0],state[2]],mpo,block=None,lmps=[lstate[0],lstate[2]])
+            else:
+                mpo = [ob["mpo"][2],ob["mpo"][2]]
+                newBlock = makeBlocks([state[0],state[2]],mpo,block=ob["block"],lmps=[lstate[0],lstate[2]])
+            ob["block"][0] = newBlock[0]
+            ob["block"][1] = newBlock[1]
+            # Evaluate Operator
+            ob["val"] = einsum('ijk,ijk,i,k',ob["block"][0],ob["block"][1],state[1],lstate[1])/norm
+
+def normalizeOpVals(obsvs,normFactor):
+    for ob in obsvs:
+        if ob["useBlock"] == False:
+            if len(ob["mpo"]) == 2:
+                ob["val"] /= normFactor
+            else:
+                ob["val"][0] /= normFactor
+                ob["val"][1] /= normFactor
+        else:
+            ob["val"] /= normFactor
+        if ob["print"]:
+                print('\t\t'+ob["name"]+' = '+'{}'.format(ob["val"]))
+    return obsvs
 
 def makeBlocks(mps,mpo=None,block=None,lmps=None):
     if block is None:
@@ -87,19 +141,11 @@ def makeBlocks(mps,mpo=None,block=None,lmps=None):
     if lmps is None:
         lmps = mps
     if mpo is None:
-        #print(np.sum(np.sum(np.abs(einsum('ilk,ilm->km',einsum('jl,ijk->ilk',block[0],lmps[0].conj()),mps[0])-
-        #                           einsum('ij,kil,kim->lm',block[0],lmps[0].conj(),mps[0])))))
-        #print(np.sum(np.sum(np.abs(einsum('nkp,nmp->km',einsum('op,nko->nkp',block[1],lmps[1].conj()),mps[1])-
-        #                           einsum('ijk,ilm,km->jl',lmps[1].conj(),mps[1],block[1])))))
         tmp1 = einsum('jl,ijk->ilk',block[0],lmps[0].conj())
         block[0] = einsum('ilk,ilm->km',tmp1,mps[0])
         tmp1 = einsum('op,nko->nkp',block[1],lmps[1].conj())
         block[1] = einsum('nkp,nmp->km',tmp1,mps[1])
     else:
-        #print(np.sum(np.sum(np.abs(einsum('kmno,okp->mnp',einsum('jklm,jnlo->kmno',einsum('ijk,lim->jklm',block[0],lmps[0].conj()),mpo[0]),mps[0])-
-        #                           einsum('ijk,lim,jnlo,okp->mnp',block[0],lmps[0].conj(),mpo[0],mps[0])))))
-        #print(np.sum(np.sum(np.abs(einsum('iklo,ijk->jlo',einsum('kmno,lmin->iklo',einsum('nop,kmp->kmno',mps[1],block[1]),mpo[1]),lmps[1].conj())-
-        #                           einsum('ijk,lmin,nop,kmp->jlo',lmps[1].conj(),mpo[1],mps[1],block[1])))))
         tmp1 = einsum('ijk,lim->jklm',block[0],lmps[0].conj())
         tmp2 = einsum('jklm,jnlo->kmno',tmp1,mpo[0])
         block[0] = einsum('kmno,okp->mnp',tmp2,mps[0])
@@ -186,7 +232,7 @@ def calcEntanglement(S):
     entEntr = np.sum(entSpect)
     return entEntr,entSpect
 
-def runOptR(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,maxIter=10000,tol=1e-4,plotConv=True,d=2):
+def runOptR(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,maxIter=10000,tol=1e-10,plotConv=True,d=2,obsvs=None):
     print('Running R Optimization Scheme')
     # Set up Iterative Loop Parameters
     fig = initializePlot(plotConv)
@@ -245,7 +291,12 @@ def runOptR(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,max
             updatePlot(plotConv,fig,Evec,nBondVec)
     return E
 
-def runOptLR(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,maxIter=10000,tol=1e-4,plotConv=True,d=2):
+def normEigVecs(v,vl):
+    v /= np.sum(v)
+    vl /= np.dot(v,vl)
+    return v,vl
+
+def runOptLR(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,maxIter=10000,tol=1e-10,plotConv=True,d=2,obsvs=None):
     print('Running LR Optimization Scheme')
     # Extract Inputs
     mps,mpsl = mps[0],mps[1]
@@ -279,6 +330,7 @@ def runOptLR(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,ma
         Hl = setupEigenProb(mpol,hBlockL,nextGuessL)
         El,vl = runEigenSolver(Hl)
         El /= nBond
+        v,vl = normEigVecs(v,vl)
         # ------------------------------------------------------------------------------
         # Reshape result into state
         (_,_,n1,_) = mpo.shape
@@ -298,18 +350,21 @@ def runOptLR(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,ma
         EE,_ = calcEntanglement(S)
         (Al,Sl,Bl) = decompose(lpsi,a)
         mpsl= [Al,Bl]
+        ############################################
+        # Evaluate Observables
+        obVals = evaluateObservables([A,S,B],[Al,Sl,Bl],block=blockLR,obsvs=obsvs)
         # -----------------------------------------------------------------------------
         # Store left and right environments
         block = makeBlocks(mps,block=block)
         hBlock = makeBlocks(mps,mpo=[mpo,mpo],block=hBlock)
         blockL = makeBlocks(mpsl,block=blockL)
         hBlockL= makeBlocks(mpsl,mpo=[mpol,mpol],block=hBlockL)
-        blockLR= makeBlocks(mps,lmps=mpsl)
-        hBlockLR= makeBlocks(mps,lmps=mpsl,mpo=[mpo,mpo])
-        print(E,El)
+        blockLR= makeBlocks(mps,lmps=mpsl,block=blockLR)
+        hBlockLR= makeBlocks(mps,lmps=mpsl,mpo=[mpo,mpo],block=hBlockLR)
         E = einsum('ijk,i,k,ijk->',hBlock[0],S,S,hBlock[1]) / einsum('ko,k,o,ko->',block[0],S,S,block[1]) / nBond
         El = einsum('ijk,i,k,ijk->',hBlockL[0] ,Sl,Sl,hBlockL[1] ) / einsum('ko,k,o,ko->',blockL[0] ,Sl,Sl,blockL[1] ) / nBond
         Elr= einsum('ijk,i,k,ijk->',hBlockLR[0],S ,Sl,hBlockLR[1]) / einsum('ko,k,o,ko->',blockLR[0],S ,Sl,blockLR[1]) / nBond
+        obsvs = normalizeOpVals(obsvs,einsum('ko,k,o,ko->',blockLR[0],S ,Sl,blockLR[1]))
         # -----------------------------------------------------------------------------
         # Make next Initial Guess
         nextGuess = makeNextGuess(A,S,B,a,maxBondDim)
@@ -331,42 +386,30 @@ def runOptLR(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,ma
             updatePlot(plotConv,fig,Evec,nBondVec)
     return E
 
-def runOpt(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,maxIter=10000,tol=1e-4,plotConv=True,d=2):
+def runOpt(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,maxIter=10000,tol=1e-10,plotConv=True,d=2,obsvs=None):
     if len(mpo) == 2:
-        E = runOptLR(mps,mpo,block,hBlock,nextGuess,E_init,maxBondDim,minIter,maxIter,tol,plotConv,d)
+        E = runOptLR(mps,mpo,block,hBlock,nextGuess,E_init,maxBondDim,minIter,maxIter,tol,plotConv,d,obsvs)
     else:
-        E = runOptR(mps,mpo,block,hBlock,nextGuess,E_init,maxBondDim,minIter,maxIter,tol,plotConv,d)
+        E = runOptR(mps,mpo,block,hBlock,nextGuess,E_init,maxBondDim,minIter,maxIter,tol,plotConv,d,obsvs)
     return E
 
 if __name__ == "__main__":
     ############################################
     # Inputs
-    alpha = 0.35
-    beta = 2./3.
+    alpha = 0.5
+    beta = 0.5
     p = 1.
     s = -1.
     ds = 0.01
     hamType = 'tasep'
-    mbd = 100
+    mbd = 10
     ############################################
     # Run Current Calculation 1
     hmpo = createHamMPO(hamType,(alpha,beta,s))
     hmpol= createHamMPO(hamType,(alpha,beta,s),conjTrans=True)
-    (E,mps,block,hBlock,nextGuess) = createInitMPS(hmpo,Wl=hmpol)
-    E0 = runOpt(mps,[hmpo[2],hmpol[2]],block,hBlock,nextGuess,E_init=E,maxBondDim=mbd)
-    # Run Current Calculation 2
-    hmpo = createHamMPO(hamType,(alpha,beta,1.))
-    hmpol= createHamMPO(hamType,(alpha,beta,1.),conjTrans=True)
-    (E,mps,block,hBlock,nextGuess) = createInitMPS(hmpo,Wl=hmpol)
-    E0 = runOpt(mps,[hmpo[2],hmpol[2]],block,hBlock,nextGuess,E_init=E,maxBondDim=mbd)
-    # Run Current Calculation 1
-    hmpo = createHamMPO(hamType,(alpha,beta,s))
-    #hmpol= createHamMPO(hamType,(alpha,beta,s+ds),conjTrans=True)
-    (E,mps,block,hBlock,nextGuess) = createInitMPS(hmpo)#,Wl=hmpol)
-    E1 = runOpt(mps,hmpo[2],block,hBlock,nextGuess,E_init=E,maxBondDim=mbd)
-    # Run Current Calculation 2
-    hmpo = createHamMPO(hamType,(alpha,beta,s-ds))
-    #hmpol= createHamMPO(hamType,(alpha,beta,s-ds),conjTrans=True)
-    (E,mps,block,hBlock,nextGuess) = createInitMPS(hmpo)#,Wl=hmpol)
-    E2 = runOpt(mps,hmpo[2],block,hBlock,nextGuess,E_init=E,maxBondDim=mbd)
-    print('Current = {}'.format((E1-E2)/(2*ds)))
+    currGlOp = {"mpo": createGlobalCurrMPO(hamType,(alpha,beta,s)),"useBlock":True, "block":[None]*2,"print":True,"name":"Global Current","val":None}
+    currLoOp = {"mpo": createLocalCurrMPO( hamType,(alpha,beta,s)),"useBlock":False,"block":[None]*2,"print":True,"name":"Local Current","val":None}
+    densOp   = {"mpo": createLocalDensMPO(),                       "useBlock":False,"block":[None]*2,"print":True,"name":"Local Density","val":None}
+    obsvs = [currGlOp,currLoOp,densOp]
+    (E,mps,block,hBlock,nextGuess) = createInitMPS(hmpo,Wl=hmpol,obsvs=obsvs)
+    E0 = runOpt(mps,[hmpo[2],hmpol[2]],block,hBlock,nextGuess,E_init=E,maxBondDim=mbd,obsvs=obsvs)
