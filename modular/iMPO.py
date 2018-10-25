@@ -25,13 +25,13 @@ def createHamMPO(hamType,hamParams,conjTrans=False):
         ham.insert(len(ham),np.array([[I,z,z,z],[Sm,z,z,z],[v,z,z,z],[z,np.exp(-s)*Sp,-n,I]]))
     elif hamType == 'sep':
         # Generic Simple Exclusion Process -----------------------------------------------------
-        alpha = hamParams[0]
-        delta = hamParams[1]
-        gamma = hamParams[2]
-        beta = hamParams[3]
-        p = hamParams[4]
-        q = hamParams[5]
-        s = hamParams[6]
+        alpha = float(param[0])
+        gamma = float(param[1])
+        p = float(param[2])
+        q = float(param[3])
+        beta = float(param[4])
+        delta = float(param[5])
+        s = float(param[6])
         exp_alpha = np.exp(-s)*alpha
         exp_beta = np.exp(-s)*beta
         exp_p = np.exp(-s)*p
@@ -101,7 +101,26 @@ def createGlobalCurrMPO(hamType,hamParams,conjTrans=False):
                                [z ,exp_p*Sp, I]])
     elif hamType == 'sep':
         # Generic Simple Exclusion Process -----------------------------------------------------
-        print('SEP Current Not Implemented') # PH - Fix this
+        alpha = float(param[0])
+        gamma = float(param[1])
+        p = float(param[2])
+        q = float(param[3])
+        beta = float(param[4])
+        delta = float(param[5])
+        s = float(param[6])
+        exp_alpha = np.exp(-s)*alpha
+        exp_beta = np.exp(-s)*beta
+        exp_p = np.exp(-s)*p
+        exp_q = np.exp(s)*q
+        exp_delta = np.exp(s)*delta
+        exp_gamma = np.exp(s)*gamma
+        currMPO = [None]*3
+        currMPO[0] = np.array([[exp_alpha*Sm-exp_gamma*Sp,Sp,Sm,I]])
+        currMPO[1] = np.array([[I],[exp_p*Sm],[-exp_q*Sp],[exp_delta*Sp-exp_beta*Sm]])
+        currMPO[2] = np.array([[        I,  z,  z, z],
+                               [ exp_p*Sm,  z,  z, z],
+                               [-exp_q*Sp,  z,  z, z],
+                               [        z, Sp, Sm, I]])
     ############################################
     # conjugate transpose operator if desired
     if conjTrans:
@@ -132,7 +151,22 @@ def createLocalCurrMPO(hamType,hamParams,conjTrans=False):
         currMPO[1] = np.array([[I],[Sm],[z]])
     elif hamType == 'sep':
         # Generic Simple Exclusion Process -----------------------------------------------------
-        print('SEP Current Not Implemented') # PH - Fix this
+        alpha = float(param[0])
+        gamma = float(param[1])
+        p = float(param[2])
+        q = float(param[3])
+        beta = float(param[4])
+        delta = float(param[5])
+        s = float(param[6])
+        exp_alpha = np.exp(-s)*alpha
+        exp_beta = np.exp(-s)*beta
+        exp_p = np.exp(-s)*p
+        exp_q = np.exp(s)*q
+        exp_delta = np.exp(s)*delta
+        exp_gamma = np.exp(s)*gamma
+        currMPO = [None]*2
+        currMPO[0] = np.array([[z,Sp,Sm,I]])
+        currMPO[1] = np.array([[I],[exp_p*Sm],[-exp_q*Sp],[z]])
     ############################################
     # conjugate transpose operator if desired
     if conjTrans:
