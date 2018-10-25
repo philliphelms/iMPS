@@ -3,14 +3,15 @@ from pyscf.lib.linalg_helper import eig
 from pyscf.lib.numpy_helper import einsum
 from scipy import linalg as la
 from iMPO import *
+VERBOSE = 0
 
 ############################################################################
 # General Simple Exclusion Process:
 
 #                     _p_
 #           ___ ___ _|_ \/_ ___ ___ ___ ___ ___
-# alpha--->|   |   |   |   |   |   |   |   |   |---> beta
-# gamma<---|___|___|___|___|___|___|___|___|___|<--- delta
+# alpha--->|   |   |   |   |   |   |   |   |   |---> delta
+# gamma<---|___|___|___|___|___|___|___|___|___|<--- beta
 #                   /\___|
 #                      q 
 #
@@ -43,7 +44,6 @@ def createInitMPS(W,Wl=None,maxBondDim=10,d=2,obsvs=None):
     # Ensure Proper Normalization
     # <-|R> = 1
     # <L|R> = 1
-    print(e0)
     rwf = rwf/np.sum(rwf)
     lwf = lwf/np.sum(lwf*rwf)
     ############################################
@@ -132,6 +132,7 @@ def normalizeObservables(obsvs,normFactor):
             ob["val"] /= normFactor
             ob["valVec"].append(ob["val"])
         if ob["print"]:
+            if VERBOSE > 2:
                 print('\t\t'+ob["name"]+' = '+'{}'.format(ob["val"]))
     return obsvs
 
@@ -229,14 +230,16 @@ def runEigenSolver(H):
 def calcEntanglement(S):
     # PH - Calc left entanglement
     entSpect = -S**2*np.log2(S**2)
-    #print('\t\tEntanglement Spec: {}'.format(entSpect))
+    if VERBOSE > 5:
+        print('\t\tEntanglement Spec: {}'.format(entSpect))
     for i in range(len(entSpect)):
         if np.isnan(entSpect[i]): entSpect[i] = 0
     entEntr = np.sum(entSpect)
     return entEntr,entSpect
 
 def runOptR(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,maxIter=10000,tol=1e-10,plotConv=True,d=2,obsvs=None):
-    print('Running R Optimization Scheme')
+    if VERBOSE > 3:
+        print('Running R Optimization Scheme')
     # Set up Iterative Loop Parameters
     fig = initializePlot(plotConv)
     converged = False
@@ -278,14 +281,16 @@ def runOptR(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,max
         nextGuess = makeNextGuess(A,S,B,a,maxBondDim)
         # ------------------------------------------------------------------------------
         # Check for convergence
-        print('\tEnergy from Optimization = {}\tvonNeumann Entropy = {}'.format(E,EE))
-        print(np.abs(E-E_prev),tol)
+        if VERBOSE > 2:
+            print('\tEnergy from Optimization = {}\tvonNeumann Entropy = {}'.format(E,EE))
         if (np.abs(E - E_prev) < tol) and (iterCnt > minIter):
             converged = True
-            print('System Converged {} {}'.format(E,E_prev))
+            if VERBOSE > 1:
+                print('System Converged {} {}'.format(E,E_prev))
         elif iterCnt == maxIter:
             converged = True
-            print('Convergence not acheived')
+            if VERBOSE > 1:
+                print('Convergence not acheived')
         else:
             E_prev = E
             iterCnt += 1
@@ -300,8 +305,9 @@ def normEigVecs(v,vl):
     vl /= np.dot(v,vl)
     return v,vl
 
-def runOptLR(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,maxIter=10000,tol=1e-10,plotConv=True,d=2,obsvs=None):
-    print('Running LR Optimization Scheme')
+def runOptLR(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,maxIter=10000,tol=1e-10,plotConv=True,d=2,obsvs=None,updateFunc=None):
+    if VERBOSE > 3:
+        print('Running LR Optimization Scheme')
     # Extract Inputs
     mps,mpsl = mps[0],mps[1]
     mpo,mpol = mpo[0],mpo[1]
@@ -313,6 +319,23 @@ def runOptLR(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,ma
     hBlock   = hBlock[0]
     nextGuessL = nextGuess[1]
     nextGuess = nextGuess[0]
+    # Make a function that can update stuff
+    if updateFunc is not None:
+        passVars = (mps,mpsl,mpo,mpol,blockL,blockLR,block,hBlockL,hBlockLR,hBlock,nextGuessL,nextGuess,obsvs)
+        returnVars = updateFunc(passVars)
+        mps = returnVars[0]
+        mpsl = returnVars[1]
+        mpo = returnVars[2]
+        mpol = returnVars[3]
+        blockL = returnVars[4]
+        blockLR = returnVars[5]
+        block = returnVars[6]
+        hBlockL = returnVars[7]
+        hBlockLR = returnVars[8]
+        hBlock = returnVars[9]
+        nextGuessL = returnVars[10]
+        nextGuess = returnVars[11]
+        obsvs = returnVars[12]
     # Set up Iterative Loop Parameters
     fig = initializePlot(plotConv)
     converged = False
@@ -376,13 +399,16 @@ def runOptLR(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,ma
         nextGuessL = makeNextGuess(Al,Sl,Bl,a,maxBondDim)
         # ------------------------------------------------------------------------------
         # Check for convergence
-        print('\tEnergy from Optimization = {},{},{}\tvonNeumann Entropy = {}'.format(E,El,Elr,EE))
+        if VERBOSE > 2:
+            print('\tEnergy from Optimization = {},{},{}\tvonNeumann Entropy = {}'.format(E,El,Elr,EE))
         if (np.abs(E - E_prev) < tol) and (iterCnt > minIter):
             converged = True
-            print('System Converged {} {}'.format(E,E_prev))
+            if VERBOSE > 1:
+                print('System Converged {} {}'.format(E,E_prev))
         elif iterCnt == maxIter:
             converged = True
-            print('Convergence not acheived')
+            if VERBOSE > 1:
+                print('Convergence not acheived')
         else:
             E_prev = E
             iterCnt += 1
@@ -390,13 +416,29 @@ def runOptLR(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,ma
             EEvec.append(EE)
             nBondVec.append(nBond)
             updatePlot(plotConv,fig,Evec,nBondVec)
+            if updateFunc is not None:
+                passVars = (mps,mpsl,mpo,mpol,blockL,blockLR,block,hBlockL,hBlockLR,hBlock,nextGuessL,nextGuess,obsvs)
+                returnVars = updateFunc(passVars)
+                mps = returnVars[0]
+                mpsl = returnVars[1]
+                mpo = returnVars[2]
+                mpol = returnVars[3]
+                blockL = returnVars[4]
+                blockLR = returnVars[5]
+                block = returnVars[6]
+                hBlockL = returnVars[7]
+                hBlockLR = returnVars[8]
+                hBlock = returnVars[9]
+                nextGuessL = returnVars[10]
+                nextGuess = returnVars[11]
+                obsvs = returnVars[12]
     return Evec,EEvec,obsvs
 
-def runOpt(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,maxIter=10000,tol=1e-10,plotConv=True,d=2,obsvs=None):
+def runOpt(mps,mpo,block,hBlock,nextGuess,E_init=0,maxBondDim=10,minIter=10,maxIter=10000,tol=1e-10,plotConv=True,d=2,obsvs=None,updateFunc=None):
     if len(mpo) == 2:
-        E = runOptLR(mps,mpo,block,hBlock,nextGuess,E_init,maxBondDim,minIter,maxIter,tol,plotConv,d,obsvs)
+        E = runOptLR(mps,mpo,block,hBlock,nextGuess,E_init,maxBondDim,minIter,maxIter,tol,plotConv,d,obsvs,updateFunc)
     else:
-        E = runOptR(mps,mpo,block,hBlock,nextGuess,E_init,maxBondDim,minIter,maxIter,tol,plotConv,d,obsvs)
+        E = runOptR(mps,mpo,block,hBlock,nextGuess,E_init,maxBondDim,minIter,maxIter,tol,plotConv,d,obsvs,updateFunc)
     return E
 
 def kernel(hamType='tasep',hamParams=(0.35,2./3.,-1),maxBondDim=100,minIter=199,maxIter=200,tol=1e-10,plotConv=False,d=2):
@@ -413,8 +455,8 @@ if __name__ == "__main__":
     # Run a tasep test to see how we approach the TDL
     alpha_vec = np.array([0.01,0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5,0.55,0.6,0.65,0.7,0.75,0.8,0.85,0.9,0.95,0.99])
     beta_vec =  np.array([0.01,0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5,0.55,0.6,0.65,0.7,0.75,0.8,0.85,0.9,0.95,0.99])
-    mbdVec = np.array([2,4])#,16,32,64,128])
-    maxIter = 10
+    mbdVec = np.array([2,4,8,16,32,64,128])#,16,32,64,128])
+    maxIter = 250
     s = 0.
     J = np.zeros((len(mbdVec),maxIter+1,len(alpha_vec),len(beta_vec)))
     rho=np.zeros((len(mbdVec),maxIter+1,len(alpha_vec),len(beta_vec)))
@@ -424,11 +466,14 @@ if __name__ == "__main__":
     for i,alpha in enumerate(alpha_vec):
         for j,beta in enumerate(beta_vec):
             for k,mbd in enumerate(mbdVec):
-                print('Working With D = {}'.format(mbd))
-                Evec,EEvec,currVec,densVec = kernel(hamType='tasep',hamParams=(alpha,beta,s),maxBondDim=mbd,minIter=maxIter-1,maxIter=maxIter,tol=1e-10,plotConv=False)
-                J[k,:,i,j] = currVec
-                rho[k,:,i,j]=densVec
-                EE[k,:,i,j] =EEvec
+                print('Progress: alpha {}/{}, beta {}/{}, mbd {}/{}'.format(i,len(alpha_vec),j,len(beta_vec),k,len(mbdVec)))
+                #alpha = alpha_vec[0]
+                #beta = beta_vec[4]
+                #mbd = mbdVec[6]
+                Evec,EEvec,currVec,densVec = kernel(hamType='tasep',hamParams=(alpha,beta,s),maxBondDim=mbd,minIter=20,maxIter=maxIter,tol=1e-10,plotConv=False)
+                J[k,:len(currVec),i,j] = currVec
+                rho[k,:len(densVec),i,j]=densVec
+                EE[k,:len(EEvec),i,j] =EEvec
                 if (alpha > 0.5) and (beta > 0.5):
                     # MC Phase
                     Jinf[i,j] = 0.25
