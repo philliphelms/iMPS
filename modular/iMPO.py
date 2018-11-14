@@ -64,7 +64,7 @@ def mpo2mat(mpo):
     mat = np.zeros((d**N,d**N))
     occ = np.zeros((d**N,N),dtype=int)
     for i in range(d**N):
-        occ[i,:] = np.asarray(list(map(lambda x: int(x),'0'*(2-len(bin(i)[2:]))+bin(i)[2:])))
+        occ[i,:] = np.asarray(list(map(lambda x: int(x),'0'*(N-len(bin(i)[N:]))+bin(i)[N:])))
     for i in range(d**N):
         i_occ = occ[i,:]
         for j in range(d**N):
