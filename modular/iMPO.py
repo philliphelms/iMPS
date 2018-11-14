@@ -25,13 +25,13 @@ def createHamMPO(hamType,hamParams,conjTrans=False):
         ham.insert(len(ham),np.array([[I,z,z,z],[Sm,z,z,z],[v,z,z,z],[z,np.exp(-s)*Sp,-n,I]]))
     elif hamType == 'sep':
         # Generic Simple Exclusion Process -----------------------------------------------------
-        alpha = float(param[0])
-        gamma = float(param[1])
-        p = float(param[2])
-        q = float(param[3])
-        beta = float(param[4])
-        delta = float(param[5])
-        s = float(param[6])
+        alpha = float(hamParams[0])
+        gamma = float(hamParams[1])
+        p = float(hamParams[2])
+        q = float(hamParams[3])
+        beta = float(hamParams[4])
+        delta = float(hamParams[5])
+        s = float(hamParams[6])
         exp_alpha = np.exp(-s)*alpha
         exp_beta = np.exp(-s)*beta
         exp_p = np.exp(-s)*p
@@ -101,13 +101,13 @@ def createGlobalCurrMPO(hamType,hamParams,conjTrans=False):
                                [z ,exp_p*Sp, I]])
     elif hamType == 'sep':
         # Generic Simple Exclusion Process -----------------------------------------------------
-        alpha = float(param[0])
-        gamma = float(param[1])
-        p = float(param[2])
-        q = float(param[3])
-        beta = float(param[4])
-        delta = float(param[5])
-        s = float(param[6])
+        alpha = float(hamParams[0])
+        gamma = float(hamParams[1])
+        p = float(hamParams[2])
+        q = float(hamParams[3])
+        beta = float(hamParams[4])
+        delta = float(hamParams[5])
+        s = float(hamParams[6])
         exp_alpha = np.exp(-s)*alpha
         exp_beta = np.exp(-s)*beta
         exp_p = np.exp(-s)*p
@@ -151,13 +151,13 @@ def createLocalCurrMPO(hamType,hamParams,conjTrans=False):
         currMPO[1] = np.array([[I],[Sm],[z]])
     elif hamType == 'sep':
         # Generic Simple Exclusion Process -----------------------------------------------------
-        alpha = float(param[0])
-        gamma = float(param[1])
-        p = float(param[2])
-        q = float(param[3])
-        beta = float(param[4])
-        delta = float(param[5])
-        s = float(param[6])
+        alpha = float(hamParams[0])
+        gamma = float(hamParams[1])
+        p = float(hamParams[2])
+        q = float(hamParams[3])
+        beta = float(hamParams[4])
+        delta = float(hamParams[5])
+        s = float(hamParams[6])
         exp_alpha = np.exp(-s)*alpha
         exp_beta = np.exp(-s)*beta
         exp_p = np.exp(-s)*p
